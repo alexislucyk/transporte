@@ -5,11 +5,13 @@
 $viajeId = $params[0];
 
 // 1. Obtener datos del viaje
-$stmt = $pdo->prepare("SELECT v.*, c.razon_social as cliente, CONCAT(ch.apellido, ', ', ch.nombre) as chofer_nombre, ve.dominio as patente 
+$stmt = $pdo->prepare("SELECT v.*, c.razon_social as cliente, CONCAT(ch.apellido, ', ', ch.nombre) as chofer_nombre, ve.dominio as patente, cp.razon_social as pagador_nombre, ccom.razon_social as comisionista_nombre 
                        FROM viajes v 
                        JOIN clientes c ON v.cliente_id = c.id 
                        JOIN choferes ch ON v.chofer_id = ch.id 
                        JOIN vehiculos ve ON v.vehiculo_id = ve.id 
+                       LEFT JOIN clientes cp ON v.pagador_id = cp.id
+                       LEFT JOIN clientes ccom ON v.comisionista_id = ccom.id
                        WHERE v.id = ? AND v.transportista_id = ?");
 $stmt->execute([$viajeId, $active_company_id]);
 $v = $stmt->fetch();
@@ -28,18 +30,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $sql = "UPDATE viajes SET peso_bruto=?, peso_tara=?, total_flete_neto=?, estado='descargado' WHERE id=?"; // peso_bruto y peso_tara almacenan Kg
             $pdo->prepare($sql)->execute([$bruto_kg, $tara_kg, $flete_neto, $viajeId]);
-            header("Location: " . $base_path . "viajes/detalle/" . $viajeId); exit;
-        } catch (PDOException $e) { $error = $e->getMessage(); }
-    }
-
-    // --- Registrar Facturación ---
-    if (isset($_POST['action']) && $_POST['action'] === 'registrar_factura') {
-        $nro = trim($_POST['factura_nro']);
-        $fecha = $_POST['factura_fecha'];
-        
-        try {
-            $sql = "UPDATE viajes SET factura_nro=?, factura_fecha=?, estado='facturado' WHERE id=?";
-            $pdo->prepare($sql)->execute([$nro, $fecha, $viajeId]);
             header("Location: " . $base_path . "viajes/detalle/" . $viajeId); exit;
         } catch (PDOException $e) { $error = $e->getMessage(); }
     }
@@ -67,8 +57,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // --- Editar Datos del Viaje ---
     if (isset($_POST['action']) && $_POST['action'] === 'editar_viaje') {
         try {
-            $sql = "UPDATE viajes SET chofer_porcentaje=?, acoplado=?, producto=?, tarifa_tonelada=?, comision_tipo=?, comision_valor=?, comision_receptor=?, pagador_flete=? WHERE id=?";
-            $pdo->prepare($sql)->execute([$_POST['porcentaje'], $_POST['acoplado'], $_POST['producto'], $_POST['tarifa'], $_POST['comision_tipo'], $_POST['comision_valor'], $_POST['comision_receptor'], $_POST['pagador_flete'], $viajeId]);
+            $sql = "UPDATE viajes SET chofer_porcentaje=?, acoplado=?, producto=?, tarifa_tonelada=?, comision_tipo=?, comision_valor=?, comisionista_id=?, pagador_id=? WHERE id=?";
+            $pdo->prepare($sql)->execute([$_POST['porcentaje'], $_POST['acoplado'], $_POST['producto'], $_POST['tarifa'], $_POST['comision_tipo'], $_POST['comision_valor'], $_POST['comisionista_id'] ?: null, $_POST['pagador_id'] ?: null, $viajeId]);
             
             // Si el viaje ya estaba descargado, debemos recalcular el flete neto con la nueva tarifa
             $pdo->prepare("UPDATE viajes SET total_flete_neto = (peso_neto / 1000) * tarifa_tonelada WHERE id = ? AND estado != 'en_viaje'")->execute([$viajeId]);
@@ -132,9 +122,6 @@ $adelantos = $pdo->prepare("SELECT * FROM viajes_adelantos WHERE viaje_id = ?");
                 <?php if ($v['estado'] === 'en_viaje'): ?>
                     <button onclick="openModal('modal-descarga')" class="btn-primary" style="background:#2ecc71"><i class="fas fa-balance-scale"></i> Finalizar Descarga</button>
                 <?php endif; ?>
-                <?php if ($v['estado'] === 'descargado'): ?>
-                    <button onclick="openModal('modal-factura')" class="btn-primary" style="background:#3498db"><i class="fas fa-file-invoice"></i> Registrar Factura</button>
-                <?php endif; ?>
                 <?php if ($v['estado'] === 'facturado'): ?>
                     <button onclick="openModal('modal-cobro')" class="btn-primary" style="background:#2ecc71"><i class="fas fa-money-bill-wave"></i> Registrar Cobro</button>
                 <?php endif; ?>
@@ -194,11 +181,11 @@ $adelantos = $pdo->prepare("SELECT * FROM viajes_adelantos WHERE viaje_id = ?");
                 elseif ($v['comision_tipo'] === 'monto_fijo') echo formatMoney($v['comision_valor']);
                 else echo 'No paga';
                 
-                if ($v['comision_receptor']) echo " (a " . htmlspecialchars($v['comision_receptor']) . ")";
+                if ($v['comisionista_nombre']) echo " (a " . htmlspecialchars($v['comisionista_nombre']) . ")";
                 ?>
             </p>
 
-            <p><strong>Pagador Flete:</strong> <?= htmlspecialchars($v['pagador_flete'] ?: 'No especificado') ?></p>
+            <p><strong>Pagador Flete:</strong> <?= htmlspecialchars($v['pagador_nombre'] ?: 'No especificado') ?></p>
 
             <?php if (isset($v['factura_nro']) && $v['factura_nro']): ?>
                 <hr style="opacity: 0.1; margin: 15px 0;">
@@ -364,23 +351,6 @@ $adelantos = $pdo->prepare("SELECT * FROM viajes_adelantos WHERE viaje_id = ?");
             </div>
             <div class="modal-footer">
                 <button type="submit" class="btn-primary">Guardar Cambios</button>
-            </div>
-        </form>
-    </div>
-</div>
-
-<!-- Modal Facturación -->
-<div id="modal-factura" class="modal">
-    <div class="modal-content" style="max-width: 450px;">
-        <div class="modal-header"><h3>Registrar Facturación</h3><span class="close-modal" onclick="closeModal('modal-factura')">&times;</span></div>
-        <form method="POST">
-            <div class="modal-body">
-                <input type="hidden" name="action" value="registrar_factura">
-                <div class="form-group"><label>Número de Factura</label><input type="text" name="factura_nro" class="input-field" placeholder="0001-00001234" required></div>
-                <div class="form-group"><label>Fecha de Emisión</label><input type="date" name="factura_fecha" class="input-field" value="<?= date('Y-m-d') ?>" required></div>
-            </div>
-            <div class="modal-footer">
-                <button type="submit" class="btn-primary">Confirmar Facturación</button>
             </div>
         </form>
     </div>

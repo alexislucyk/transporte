@@ -9,18 +9,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     $razon = trim($_POST['razon_social']);
     $cuit = trim($_POST['cuit']);
     $dir = trim($_POST['direccion']);
+    $es_comercial = isset($_POST['es_comercial']) ? 1 : 0;
+    $es_pagador = isset($_POST['es_pagador']) ? 1 : 0;
+    $es_comisionista = isset($_POST['es_comisionista']) ? 1 : 0;
 
     if ($_POST['action'] === 'nuevo') {
         try {
-            $stmt = $pdo->prepare("INSERT INTO clientes (transportista_id, razon_social, cuit, direccion) VALUES (?, ?, ?, ?)");
-            $stmt->execute([$active_company_id, $razon, $cuit, $dir]);
+            $stmt = $pdo->prepare("INSERT INTO clientes (transportista_id, razon_social, cuit, direccion, es_comercial, es_pagador, es_comisionista) VALUES (?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([$active_company_id, $razon, $cuit, $dir, $es_comercial, $es_pagador, $es_comisionista]);
             $mensaje = "Cliente registrado con éxito.";
         } catch (PDOException $e) { $error = "Error: " . $e->getMessage(); }
     }
     if ($_POST['action'] === 'editar') {
         try {
-            $stmt = $pdo->prepare("UPDATE clientes SET razon_social=?, cuit=?, direccion=? WHERE id=? AND transportista_id=?");
-            $stmt->execute([$razon, $cuit, $dir, $_POST['id'], $active_company_id]);
+            $stmt = $pdo->prepare("UPDATE clientes SET razon_social=?, cuit=?, direccion=?, es_comercial=?, es_pagador=?, es_comisionista=? WHERE id=? AND transportista_id=?");
+            $stmt->execute([$razon, $cuit, $dir, $es_comercial, $es_pagador, $es_comisionista, $_POST['id'], $active_company_id]);
             $mensaje = "Cliente actualizado.";
         } catch (PDOException $e) { $error = "Error: " . $e->getMessage(); }
     }
@@ -58,6 +61,7 @@ $lista = $clientes->fetchAll();
                 <th>Razón Social</th>
                 <th>CUIT</th>
                 <th>Dirección</th>
+                <th>Roles</th>
                 <th>Acciones</th>
             </tr>
         </thead>
@@ -67,6 +71,13 @@ $lista = $clientes->fetchAll();
                 <td style="font-weight:bold"><?= htmlspecialchars($c['razon_social']) ?></td>
                 <td><?= $c['cuit'] ?></td>
                 <td><?= htmlspecialchars($c['direccion']) ?></td>
+                <td>
+                    <div style="display: flex; gap: 5px;">
+                        <?php if($c['es_comercial']): ?><span class="badge" style="background:#3498db; color:white; font-size:10px;">COM</span><?php endif; ?>
+                        <?php if($c['es_pagador']): ?><span class="badge" style="background:#2ecc71; color:white; font-size:10px;">PAG</span><?php endif; ?>
+                        <?php if($c['es_comisionista']): ?><span class="badge" style="background:#f39c12; color:white; font-size:10px;">COMIS</span><?php endif; ?>
+                    </div>
+                </td>
                 <td>
                     <button onclick='editCliente(<?= json_encode($c) ?>)' title="Editar" style="background:none; border:none; color:var(--accent); cursor:pointer;"><i class="fas fa-edit"></i></button>
                 </td>
@@ -98,6 +109,17 @@ $lista = $clientes->fetchAll();
                     <label>Dirección</label>
                     <input type="text" name="direccion" id="c-dir" class="input-field">
                 </div>
+                <div class="form-group" style="display: flex; gap: 15px; margin-top: 10px;">
+                    <label style="display: flex; align-items: center; gap: 5px; font-weight: normal;">
+                        <input type="checkbox" name="es_comercial" id="c-comercial" value="1"> Cliente Comercial
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 5px; font-weight: normal;">
+                        <input type="checkbox" name="es_pagador" id="c-pagador" value="1"> Pagador Flete
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 5px; font-weight: normal;">
+                        <input type="checkbox" name="es_comisionista" id="c-comisionista" value="1"> Comisionista
+                    </label>
+                </div>
             </div>
             <div class="modal-footer">
                 <button type="submit" class="btn-primary">Guardar Cliente</button>
@@ -120,6 +142,9 @@ function editCliente(data) {
     document.getElementById('c-razon').value = data.razon_social;
     document.getElementById('c-cuit').value = data.cuit;
     document.getElementById('c-dir').value = data.direccion;
+    document.getElementById('c-comercial').checked = data.es_comercial == 1;
+    document.getElementById('c-pagador').checked = data.es_pagador == 1;
+    document.getElementById('c-comisionista').checked = data.es_comisionista == 1;
     openModal('modal-cliente');
 }
 </script>

@@ -20,13 +20,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $porcentaje_actual = $stmt_ch->fetchColumn() ?: 0;
 
         $total_flete = $_POST['peso_estimado'] * $_POST['tarifa_tonelada'];
-        $sql = "INSERT INTO viajes (transportista_id, cliente_id, chofer_id, vehiculo_id, acoplado, origen, destino, producto, fecha_carga, tarifa_tonelada, total_flete_bruto, chofer_porcentaje, comision_tipo, comision_valor, comision_receptor, pagador_flete, ctg_nro, carta_porte_nro, otros_docs, estado) 
+        $sql = "INSERT INTO viajes (transportista_id, cliente_id, chofer_id, vehiculo_id, acoplado, origen, destino, producto, fecha_carga, tarifa_tonelada, total_flete_bruto, chofer_porcentaje, comision_tipo, comision_valor, comisionista_id, pagador_id, ctg_nro, carta_porte_nro, otros_docs, estado) 
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'en_viaje')";
         $pdo->prepare($sql)->execute([
             $active_company_id, $_POST['cliente_id'], $_POST['chofer_id'], $_POST['vehiculo_id'], 
             $_POST['acoplado'], $_POST['origen'], $_POST['destino'], $_POST['producto'], 
             $_POST['fecha_carga'], $_POST['tarifa_tonelada'], $total_flete, $porcentaje_actual,
-            $_POST['comision_tipo'], $_POST['comision_valor'], $_POST['comision_receptor'], $_POST['pagador_flete'],
+            $_POST['comision_tipo'], $_POST['comision_valor'], $_POST['comisionista_id'] ?: null, $_POST['pagador_id'] ?: null,
             $_POST['ctg_nro'], $_POST['carta_porte_nro'], $_POST['otros_docs']
         ]);
         $mensaje = "Viaje iniciado correctamente.";
@@ -34,8 +34,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 }
 
 // --- CARGAR SELECTORES ---
-$stmt_cli = $pdo->prepare("SELECT id, razon_social FROM clientes WHERE transportista_id = ?"); $stmt_cli->execute([$active_company_id]);
-$lista_clientes = $stmt_cli->fetchAll();
+// 1. Clientes Comerciales (Dadores de carga)
+$stmt_cli = $pdo->prepare("SELECT id, razon_social FROM clientes WHERE transportista_id = ? AND es_comercial = 1"); $stmt_cli->execute([$active_company_id]);
+$lista_comerciales = $stmt_cli->fetchAll();
+
+// 2. Pagadores y Comisionistas
+$stmt_pag = $pdo->prepare("SELECT id, razon_social FROM clientes WHERE transportista_id = ? AND es_pagador = 1"); $stmt_pag->execute([$active_company_id]);
+$lista_pagadores = $stmt_pag->fetchAll();
+$stmt_com = $pdo->prepare("SELECT id, razon_social FROM clientes WHERE transportista_id = ? AND es_comisionista = 1"); $stmt_com->execute([$active_company_id]);
+$lista_comisionistas = $stmt_com->fetchAll();
 
 $stmt_cho = $pdo->prepare("SELECT id, nombre, apellido FROM choferes WHERE transportista_id = ? AND activo = 1"); $stmt_cho->execute([$active_company_id]);
 $lista_choferes = $stmt_cho->fetchAll();
@@ -59,6 +66,18 @@ $lista_viajes = $viajes->fetchAll();
     <h1>Operativa de Viajes</h1>
     <button onclick="openModal('modal-viaje')" class="btn-primary"><i class="fas fa-route"></i> Nuevo Viaje</button>
 </div>
+
+<style>
+    /* Estilos para que el modal sea responsivo */
+    .form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+    }
+    @media (max-width: 768px) {
+        .modal-content { width: 95% !important; margin: 2% auto !important; }
+    }
+</style>
 
 <?php if ($mensaje): ?>
     <div style="background: #d4edda; color: #155724; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #c3e6cb;">
@@ -122,16 +141,16 @@ $lista_viajes = $viajes->fetchAll();
 </div>
 
 <div id="modal-viaje" class="modal">
-    <div class="modal-content" style="max-width: 800px;">
+    <div class="modal-content" style="width: 90%; max-width: 900px; max-height: 95vh; display: flex; flex-direction: column;">
         <div class="modal-header"><h3>Registrar Nuevo Viaje</h3><span class="close-modal" onclick="closeModal('modal-viaje')">&times;</span></div>
-        <form method="POST">
-            <div class="modal-body">
+        <form method="POST" style="overflow: hidden; display: flex; flex-direction: column;">
+            <div class="modal-body" style="overflow-y: auto; flex: 1;">
                 <input type="hidden" name="action" value="nuevo">
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;">
+                <div class="form-grid">
                     <div class="form-group">
                         <label>Cliente</label>
                         <select name="cliente_id" class="input-field" required>
-                            <?php foreach($lista_clientes as $c): ?><option value="<?= $c['id'] ?>"><?= htmlspecialchars($c['razon_social']) ?></option><?php endforeach; ?>
+                            <?php foreach($lista_comerciales as $c): ?><option value="<?= $c['id'] ?>"><?= htmlspecialchars($c['razon_social']) ?></option><?php endforeach; ?>
                         </select>
                     </div>
                     <div class="form-group">
@@ -149,7 +168,7 @@ $lista_viajes = $viajes->fetchAll();
                     </div>
                 </div>
 
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                <div class="form-grid">
                     <div class="form-group">
                         <label>Chofer</label>
                         <select name="chofer_id" id="ch-select" class="input-field" required>
@@ -163,7 +182,7 @@ $lista_viajes = $viajes->fetchAll();
                     </div>
                 </div>
 
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                <div class="form-grid">
                     <div class="form-group">
                         <label>Comisión Dador de Carga</label>
                         <select name="comision_tipo" class="input-field">
@@ -177,12 +196,15 @@ $lista_viajes = $viajes->fetchAll();
                         <input type="number" step="0.01" name="comision_valor" class="input-field" value="0">
                     </div>
                     <div class="form-group">
-                        <label>Receptor de Comisión</label>
-                        <input type="text" name="comision_receptor" class="input-field" placeholder="Nombre de quien cobra">
+                        <label>Comisionista</label>
+                        <select name="comisionista_id" class="input-field">
+                            <option value="">-- Seleccionar si corresponde --</option>
+                            <?php foreach($lista_comisionistas as $c): ?><option value="<?= $c['id'] ?>"><?= htmlspecialchars($c['razon_social']) ?></option><?php endforeach; ?>
+                        </select>
                     </div>
                 </div>
 
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;">
+                <div class="form-grid">
                     <div class="form-group">
                         <label>CTG (Granos)</label>
                         <input type="text" name="ctg_nro" class="input-field" placeholder="Nro de CTG">
@@ -197,16 +219,19 @@ $lista_viajes = $viajes->fetchAll();
                     </div>
                     <div class="form-group">
                         <label>Pagador del Flete</label>
-                        <input type="text" name="pagador_flete" class="input-field" placeholder="¿Quién paga el flete?">
+                        <select name="pagador_id" class="input-field">
+                            <option value="">-- Seleccionar Pagador --</option>
+                            <?php foreach($lista_pagadores as $p): ?><option value="<?= $p['id'] ?>"><?= htmlspecialchars($p['razon_social']) ?></option><?php endforeach; ?>
+                        </select>
                     </div>
                 </div>
 
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                <div class="form-grid">
                     <div class="form-group"><label>Origen</label><input type="text" name="origen" class="input-field" required></div>
                     <div class="form-group"><label>Destino</label><input type="text" name="destino" class="input-field" required></div>
                 </div>
 
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;">
+                <div class="form-grid">
                     <div class="form-group"><label>Fecha Carga</label><input type="date" name="fecha_carga" class="input-field" value="<?= date('Y-m-d') ?>" required></div>
                     <div class="form-group"><label>Tarifa x Ton.</label><input type="number" step="0.01" name="tarifa_tonelada" class="input-field" required></div>
                     <div class="form-group"><label>Peso Estimado (Ton.)</label><input type="number" step="0.01" name="peso_estimado" class="input-field" required></div>
