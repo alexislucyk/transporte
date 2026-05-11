@@ -1,0 +1,234 @@
+<?php
+/**
+ * Módulo de Operativa de Viajes - Trans Cargo Hub
+ */
+$mensaje = ""; $error = "";
+$active_company_id = $_SESSION['active_company_id'] ?? null;
+
+// --- LÓGICA DE DETALLE DE VIAJE ---
+if ($action === 'detalle' && isset($params[0])) {
+    include_once 'modules/viajes_detalle.php';
+    return;
+}
+
+// --- PROCESAR ALTA ---
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'nuevo') {
+    try {
+        // Obtener el porcentaje actual del chofer para congelarlo en el viaje
+        $stmt_ch = $pdo->prepare("SELECT porcentaje_ganancia FROM choferes WHERE id = ?");
+        $stmt_ch->execute([$_POST['chofer_id']]);
+        $porcentaje_actual = $stmt_ch->fetchColumn() ?: 0;
+
+        $total_flete = $_POST['peso_estimado'] * $_POST['tarifa_tonelada'];
+        $sql = "INSERT INTO viajes (transportista_id, cliente_id, chofer_id, vehiculo_id, acoplado, origen, destino, producto, fecha_carga, tarifa_tonelada, total_flete_bruto, chofer_porcentaje, comision_tipo, comision_valor, comision_receptor, pagador_flete, ctg_nro, carta_porte_nro, otros_docs, estado) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'en_viaje')";
+        $pdo->prepare($sql)->execute([
+            $active_company_id, $_POST['cliente_id'], $_POST['chofer_id'], $_POST['vehiculo_id'], 
+            $_POST['acoplado'], $_POST['origen'], $_POST['destino'], $_POST['producto'], 
+            $_POST['fecha_carga'], $_POST['tarifa_tonelada'], $total_flete, $porcentaje_actual,
+            $_POST['comision_tipo'], $_POST['comision_valor'], $_POST['comision_receptor'], $_POST['pagador_flete'],
+            $_POST['ctg_nro'], $_POST['carta_porte_nro'], $_POST['otros_docs']
+        ]);
+        $mensaje = "Viaje iniciado correctamente.";
+    } catch (PDOException $e) { $error = "Error: " . $e->getMessage(); }
+}
+
+// --- CARGAR SELECTORES ---
+$stmt_cli = $pdo->prepare("SELECT id, razon_social FROM clientes WHERE transportista_id = ?"); $stmt_cli->execute([$active_company_id]);
+$lista_clientes = $stmt_cli->fetchAll();
+
+$stmt_cho = $pdo->prepare("SELECT id, nombre, apellido FROM choferes WHERE transportista_id = ? AND activo = 1"); $stmt_cho->execute([$active_company_id]);
+$lista_choferes = $stmt_cho->fetchAll();
+
+// Camiones y Acoplados por separado
+$stmt_cam = $pdo->prepare("SELECT id, dominio, chofer_id, acoplado FROM vehiculos WHERE transportista_id = ?"); $stmt_cam->execute([$active_company_id]);
+$lista_camiones = $stmt_cam->fetchAll();
+
+// --- LISTADO ---
+$viajes = $pdo->prepare("SELECT v.*, c.razon_social as cliente, CONCAT(ch.apellido, ', ', ch.nombre) as chofer, ve.dominio as patente 
+                         FROM viajes v 
+                         JOIN clientes c ON v.cliente_id = c.id 
+                         JOIN choferes ch ON v.chofer_id = ch.id 
+                         JOIN vehiculos ve ON v.vehiculo_id = ve.id 
+                         WHERE v.transportista_id = ? ORDER BY v.fecha_carga DESC");
+$viajes->execute([$active_company_id]);
+$lista_viajes = $viajes->fetchAll();
+?>
+
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+    <h1>Operativa de Viajes</h1>
+    <button onclick="openModal('modal-viaje')" class="btn-primary"><i class="fas fa-route"></i> Nuevo Viaje</button>
+</div>
+
+<?php if ($mensaje): ?>
+    <div style="background: #d4edda; color: #155724; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #c3e6cb;">
+        <i class="fas fa-check-circle"></i> <?= $mensaje ?>
+    </div>
+<?php endif; ?>
+
+<?php if ($error): ?>
+    <div style="background: #f8d7da; color: #721c24; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #f5c6cb;">
+        <i class="fas fa-exclamation-triangle"></i> <?= $error ?>
+    </div>
+<?php endif; ?>
+
+<div class="card">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Fecha</th>
+                <th>Cliente</th>
+                <th>Chofer</th>
+                <th>Patente</th>
+                <th>Ruta</th>
+                <th>Flete Est.</th>
+                <th>Estado</th>
+                <th>Acciones</th>
+            </tr>
+        </thead>
+        <tbody>
+            <?php foreach($lista_viajes as $v): ?>
+            <tr>
+                <td><?= formatDate($v['fecha_carga']) ?></td>
+                <td><?= htmlspecialchars($v['cliente']) ?></td>
+                <td><?= htmlspecialchars($v['chofer']) ?></td>
+                <td style="font-weight:bold"><?= $v['patente'] ?></td>
+                <td><?= htmlspecialchars($v['origen'] . " -> " . $v['destino']) ?></td>
+                <td><?= formatMoney($v['total_flete_bruto']) ?></td>
+                <td>
+                    <?php
+                    $badgeClass = 'badge-info'; // en_viaje
+                    if ($v['estado'] == 'descargado') $badgeClass = 'badge-success';
+                    if ($v['estado'] == 'facturado') $badgeClass = 'badge-warning';
+                    if ($v['estado'] == 'cobrado') $badgeClass = 'badge-primary'; // Nuevo color para cobrado
+                    if ($v['estado'] == 'liquidado') $badgeClass = 'badge-secondary';
+                    ?>
+                    <style>
+                        .badge-warning { background: #f39c12 !important; color: white !important; }
+                        .badge-secondary { background: #95a5a6 !important; color: white !important; }
+                        .badge-primary { background: var(--accent) !important; color: white !important; } /* Usar el color de acento */
+                    </style>
+                    <span class="badge <?= $badgeClass ?>">
+                        <?= str_replace('_', ' ', strtoupper($v['estado'] ?? 'PENDIENTE')) ?>
+                    </span>
+                </td>
+                <td>
+                    <a href="viajes/detalle/<?= $v['id'] ?>" title="Ver Detalle" style="color:var(--accent);"><i class="fas fa-eye"></i></a>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+        </tbody>
+    </table>
+</div>
+
+<div id="modal-viaje" class="modal">
+    <div class="modal-content" style="max-width: 800px;">
+        <div class="modal-header"><h3>Registrar Nuevo Viaje</h3><span class="close-modal" onclick="closeModal('modal-viaje')">&times;</span></div>
+        <form method="POST">
+            <div class="modal-body">
+                <input type="hidden" name="action" value="nuevo">
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;">
+                    <div class="form-group">
+                        <label>Cliente</label>
+                        <select name="cliente_id" class="input-field" required>
+                            <?php foreach($lista_clientes as $c): ?><option value="<?= $c['id'] ?>"><?= htmlspecialchars($c['razon_social']) ?></option><?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Camión</label>
+                        <select name="vehiculo_id" id="v-select" class="input-field" onchange="sugerirChofer(this)" required>
+                            <option value="">Seleccionar...</option>
+                            <?php foreach($lista_camiones as $cam): ?>
+                                <option value="<?= $cam['id'] ?>" data-chofer="<?= $cam['chofer_id'] ?>" data-acoplado="<?= htmlspecialchars($cam['acoplado']) ?>"><?= $cam['dominio'] ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Acoplado</label>
+                        <input type="text" name="acoplado" id="aco-input" class="input-field" placeholder="Patente acoplado">
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div class="form-group">
+                        <label>Chofer</label>
+                        <select name="chofer_id" id="ch-select" class="input-field" required>
+                            <option value="">Seleccionar...</option>
+                            <?php foreach($lista_choferes as $ch): ?><option value="<?= $ch['id'] ?>"><?= htmlspecialchars($ch['apellido'] . " " . $ch['nombre']) ?></option><?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Producto</label>
+                        <input type="text" name="producto" class="input-field" placeholder="Ej: Soja, Maíz, Arena">
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div class="form-group">
+                        <label>Comisión Dador de Carga</label>
+                        <select name="comision_tipo" class="input-field">
+                            <option value="ninguna">No Paga</option>
+                            <option value="porcentaje">Porcentaje (%)</option>
+                            <option value="monto_fijo">Monto Fijo ($)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Valor Comisión</label>
+                        <input type="number" step="0.01" name="comision_valor" class="input-field" value="0">
+                    </div>
+                    <div class="form-group">
+                        <label>Receptor de Comisión</label>
+                        <input type="text" name="comision_receptor" class="input-field" placeholder="Nombre de quien cobra">
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;">
+                    <div class="form-group">
+                        <label>CTG (Granos)</label>
+                        <input type="text" name="ctg_nro" class="input-field" placeholder="Nro de CTG">
+                    </div>
+                    <div class="form-group">
+                        <label>Carta de Porte</label>
+                        <input type="text" name="carta_porte_nro" class="input-field" placeholder="Nro CP-E">
+                    </div>
+                    <div class="form-group">
+                        <label>Otros Documentos</label>
+                        <input type="text" name="otros_docs" class="input-field" placeholder="Remitos / Guías">
+                    </div>
+                    <div class="form-group">
+                        <label>Pagador del Flete</label>
+                        <input type="text" name="pagador_flete" class="input-field" placeholder="¿Quién paga el flete?">
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div class="form-group"><label>Origen</label><input type="text" name="origen" class="input-field" required></div>
+                    <div class="form-group"><label>Destino</label><input type="text" name="destino" class="input-field" required></div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;">
+                    <div class="form-group"><label>Fecha Carga</label><input type="date" name="fecha_carga" class="input-field" value="<?= date('Y-m-d') ?>" required></div>
+                    <div class="form-group"><label>Tarifa x Ton.</label><input type="number" step="0.01" name="tarifa_tonelada" class="input-field" required></div>
+                    <div class="form-group"><label>Peso Estimado (Ton.)</label><input type="number" step="0.01" name="peso_estimado" class="input-field" required></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="submit" class="btn-primary">Iniciar Viaje</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function sugerirChofer(select) {
+    const choferId = select.options[select.selectedIndex].getAttribute('data-chofer');
+    const acopladoDato = select.options[select.selectedIndex].getAttribute('data-acoplado');
+    
+    if (choferId) {
+        document.getElementById('ch-select').value = choferId;
+    }
+    if (acopladoDato) {
+        document.getElementById('aco-input').value = acopladoDato;
+    }
+}
+</script>
