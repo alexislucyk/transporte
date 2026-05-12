@@ -66,7 +66,8 @@ $titles = [
     'cobranzas' => 'Gestión de Cobranzas',
     'transportistas' => 'Gestión de Empresas',
     'mantenimiento' => 'Mantenimiento de Flota',
-    'configuracion' => 'Configuración del Sistema'
+    'configuracion' => 'Configuración del Sistema',
+    'tesoreria' => 'Tesorería y Conciliación'
 ];
 $pageTitle = $titles[$module] ?? 'Sistema de Transporte';
 ?>
@@ -102,7 +103,8 @@ $pageTitle = $titles[$module] ?? 'Sistema de Transporte';
         .nav-menu-bottom { border-top: 1px solid rgba(255,255,255,0.1); padding: 10px 0; }
         .nav-item { padding: 12px 25px; display: block; color: #bdc3c7; text-decoration: none; transition: 0.3s; }
         .nav-item:hover, .nav-item.active { background: rgba(255,255,255,0.1); color: white; border-left: 4px solid var(--accent); }
-        .nav-item i { margin-right: 10px; width: 20px; }
+        .nav-item i { margin-right: 10px; width: 20px; transition: transform 0.2s; }
+        .nav-item:hover i { transform: scale(1.15); }
         .sidebar-footer { width: 100%; padding: 15px; font-size: 0.75rem; color: #7f8c8d; border-top: 1px solid rgba(255,255,255,0.1); box-sizing: border-box; }
 
         /* Contenido Principal */
@@ -113,6 +115,7 @@ $pageTitle = $titles[$module] ?? 'Sistema de Transporte';
         .slogan { font-style: italic; color: #7f8c8d; margin-top: -20px; margin-bottom: 30px; display: block; }
 
         /* Tablas de Datos (Estilo Choferes Unificado) */
+        .table-container { width: 100%; overflow-x: auto; margin-top: 10px; -webkit-overflow-scrolling: touch; border-radius: 8px; }
         .data-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
         .data-table th, .data-table td { text-align: left; padding: 12px; border-bottom: 1px solid rgba(0,0,0,0.05); }
         .data-table th { background: rgba(0,0,0,0.02); color: var(--text); font-weight: bold; }
@@ -130,17 +133,26 @@ $pageTitle = $titles[$module] ?? 'Sistema de Transporte';
 
         /* Modales Adaptables al Tema */
         .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); backdrop-filter: blur(3px); }
-        .modal-content { background-color: var(--card); margin: 5% auto; padding: 0; border-radius: 12px; width: 50%; max-width: 600px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); overflow: hidden; animation: animatetop 0.3s; }
+        .modal-content { background-color: var(--card); margin: 2vh auto; padding: 0; border-radius: 12px; width: 90%; max-width: 600px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); overflow-y: auto; max-height: 95vh; animation: animatetop 0.3s; }
         @keyframes animatetop { from {top:-300px; opacity:0} to {top:0; opacity:1} }
-        .modal-header { padding: 15px 20px; background: var(--primary); color: white; display: flex; justify-content: space-between; align-items: center; }
+        .modal-header { padding: 15px 20px; background: var(--primary); color: white; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 10; }
         .modal-body { padding: 25px; color: var(--text); }
-        .modal-footer { padding: 15px 20px; text-align: right; background: rgba(0,0,0,0.02); border-top: 1px solid rgba(0,0,0,0.05); }
+        .modal-footer { padding: 15px 20px; text-align: right; background: rgba(0,0,0,0.02); border-top: 1px solid rgba(0,0,0,0.05); position: sticky; bottom: 0; }
         .close-modal { color: white; font-size: 24px; cursor: pointer; opacity: 0.8; }
         .close-modal:hover { opacity: 1; }
         
         /* Botones de acción del modal */
         .btn-secondary { background: #95a5a6; color: white; border: none; padding: 10px 18px; border-radius: 5px; cursor: pointer; margin-right: 10px; }
         .btn-danger { background: #e74c3c; color: white; border: none; padding: 10px 18px; border-radius: 5px; cursor: pointer; }
+
+        /* Media Queries para Pantallas Pequeñas (Adaptación 1024x768) */
+        @media (max-width: 1200px) {
+            :root { --sidebar-width: 240px; }
+            .main-content { padding: 20px; }
+        }
+        @media (max-width: 1024px) {
+            .responsive-grid { grid-template-columns: 1fr !important; }
+        }
     </style>
 </head>
 <body>
@@ -163,34 +175,37 @@ $pageTitle = $titles[$module] ?? 'Sistema de Transporte';
 
         <nav class="nav-menu">
             <a href="dashboard" class="nav-item <?= $module == 'dashboard' ? 'active' : '' ?>">
-                <i class="fas fa-chart-line"></i> Dashboard
+                <i class="fas fa-chart-line" style="color: #3498db;"></i> Dashboard
             </a>
             <a href="viajes" class="nav-item <?= $module == 'viajes' ? 'active' : '' ?>">
-                <i class="fas fa-truck-moving"></i> Viajes
+                <i class="fas fa-truck-moving" style="color: #f39c12;"></i> Viajes
             </a>
             <a href="choferes" class="nav-item <?= $module == 'choferes' ? 'active' : '' ?>">
-                <i class="fas fa-users"></i> Choferes
+                <i class="fas fa-users" style="color: #2ecc71;"></i> Choferes
             </a>
             <a href="cobranzas" class="nav-item <?= $module == 'cobranzas' ? 'active' : '' ?>">
-                <i class="fas fa-hand-holding-usd"></i> Cobranzas
+                <i class="fas fa-hand-holding-usd" style="color: #27ae60;"></i> Cobranzas
+            </a>
+            <a href="tesoreria" class="nav-item <?= $module == 'tesoreria' ? 'active' : '' ?>">
+                <i class="fas fa-vault" style="color: #f1c40f;"></i> Tesorería
             </a>
             <a href="vehiculos" class="nav-item <?= $module == 'vehiculos' ? 'active' : '' ?>">
-                <i class="fas fa-truck"></i> Vehículos
+                <i class="fas fa-truck" style="color: #9b59b6;"></i> Vehículos
             </a>
             <a href="clientes" class="nav-item <?= $module == 'clientes' ? 'active' : '' ?>">
-                <i class="fas fa-building"></i> Clientes
+                <i class="fas fa-building" style="color: #00a8ff;"></i> Clientes
             </a>
             <a href="mantenimiento" class="nav-item <?= $module == 'mantenimiento' ? 'active' : '' ?>">
-                <i class="fas fa-tools"></i> Mantenimiento
+                <i class="fas fa-tools" style="color: #e67e22;"></i> Mantenimiento
             </a>
         </nav>
 
         <nav class="nav-menu-bottom">
             <a href="transportistas" class="nav-item <?= $module == 'transportistas' ? 'active' : '' ?>">
-                <i class="fas fa-industry"></i> Empresas
+                <i class="fas fa-industry" style="color: #95a5a6;"></i> Empresas
             </a>
             <a href="configuracion" class="nav-item <?= $module == 'configuracion' ? 'active' : '' ?>">
-                <i class="fas fa-cog"></i> Configuración
+                <i class="fas fa-cog" style="color: #bdc3c7;"></i> Configuración
             </a>
         </nav>
         <div class="sidebar-footer">
@@ -199,40 +214,27 @@ $pageTitle = $titles[$module] ?? 'Sistema de Transporte';
     </aside>
 
     <main class="main-content">
-        <span class="slogan">"Donde tu carga y la eficiencia se encuentran"</span>
         <?php 
-        // 3. Sistema de Carga Dinámica de Módulos
-        switch($module) {
-            case 'dashboard':
-                include_once 'modules/dashboard.php';
-                break;
-            case 'choferes':
-                include_once 'modules/choferes.php';
-                break;
-            case 'vehiculos':
-                include_once 'modules/vehiculos.php';
-                break;
-            case 'transportistas':
-                include_once 'modules/transportistas.php';
-                break;
-            case 'clientes':
-                include_once 'modules/clientes.php';
-                break;
-            case 'viajes':
-                include_once 'modules/viajes.php';
-                break;
-            case 'cobranzas':
-                include_once 'modules/choferes_liquidar.php';
-                break;
-            case 'mantenimiento':
-                include_once 'modules/mantenimiento.php';
-                break;
-            case 'configuracion':
-                include_once 'modules/configuracion.php';
-                break;
-            default:
-                echo "<h1>404</h1><p>Módulo no encontrado.</p>";
-                break;
+        // Mapeo de rutas a archivos para mayor seguridad
+        $module_map = [
+            'dashboard'      => 'modules/dashboard.php',
+            'choferes'       => 'modules/choferes.php',
+            'vehiculos'      => 'modules/vehiculos.php',
+            'transportistas' => 'modules/transportistas.php',
+            'clientes'       => 'modules/clientes.php',
+            'viajes'         => 'modules/viajes.php',
+            'cobranzas'      => 'modules/choferes_liquidar.php',
+            'mantenimiento'  => 'modules/mantenimiento.php',
+            'configuracion'  => 'modules/configuracion.php',
+            'tesoreria'      => 'modules/tesoreria.php'
+        ];
+
+        $file_to_include = $module_map[$module] ?? null;
+
+        if ($file_to_include && file_exists($file_to_include)) {
+            include_once $file_to_include;
+        } else {
+            echo "<h1>404</h1><p>El módulo <strong>" . htmlspecialchars($module) . "</strong> no existe.</p>";
         }
         ?>
     </main>

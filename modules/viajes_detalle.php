@@ -18,17 +18,32 @@ $v = $stmt->fetch();
 
 if (!$v) die("Viaje no encontrado o acceso denegado.");
 
+// --- CÁLCULO DE RENTABILIDAD (Para vista y liquidación) ---
+$gastos_empresa_query = $pdo->prepare("SELECT SUM(monto) FROM viajes_gastos WHERE viaje_id = ? AND pagado_por = 'empresa'");
+$gastos_empresa_query->execute([$viajeId]);
+$gastos_empresa = $gastos_empresa_query->fetchColumn() ?: 0;
+
+$comision_monto = ($v['comision_tipo'] === 'porcentaje') ? ($v['total_flete_neto'] * $v['comision_valor'] / 100) : ($v['comision_tipo'] === 'monto_fijo' ? $v['comision_valor'] : 0);
+$chofer_monto = ($v['total_flete_neto'] * $v['chofer_porcentaje'] / 100);
+$ganancia_neta_empresa = $v['total_flete_neto'] - $comision_monto - $chofer_monto - $gastos_empresa;
+
 // 2. Procesar Acciones
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // Bloqueo de seguridad: Si el viaje ya fue cobrado o liquidado, no procesar modificaciones
+    if (in_array($v['estado'], ['cobrado', 'liquidado'])) {
+        $error = "El flete ya se encuentra cobrado o liquidado y no permite modificaciones.";
+    } else {
+
     // --- Registrar Descarga (Cierre de kilos) ---
     if (isset($_POST['action']) && $_POST['action'] === 'finalizar_descarga') {
         $bruto_kg = (int)$_POST['peso_bruto'];
         $tara_kg = (int)$_POST['peso_tara'];
-        $neto_kg = $bruto_kg - $tara_kg;
+        $neto_kg = max(0, $bruto_kg - $tara_kg);
         $flete_neto = ($neto_kg / 1000) * $v['tarifa_tonelada']; // Convertir Kg a Ton para el cálculo del flete
         
         try {
-            $sql = "UPDATE viajes SET peso_bruto=?, peso_tara=?, total_flete_neto=?, estado='descargado' WHERE id=?"; // peso_bruto y peso_tara almacenan Kg
+            // Actualizamos también el peso_neto (columna virtual o física según versión MySQL)
+            $sql = "UPDATE viajes SET peso_bruto=?, peso_tara=?, total_flete_neto=?, estado='descargado' WHERE id=?"; 
             $pdo->prepare($sql)->execute([$bruto_kg, $tara_kg, $flete_neto, $viajeId]);
             header("Location: " . $base_path . "viajes/detalle/" . $viajeId); exit;
         } catch (PDOException $e) { $error = $e->getMessage(); }
@@ -105,10 +120,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } catch (PDOException $e) { $error = $e->getMessage(); }
     }
 }
+}
 
 // 3. Obtener listados
 $gastos = $pdo->prepare("SELECT * FROM viajes_gastos WHERE viaje_id = ?"); $gastos->execute([$viajeId]);
 $adelantos = $pdo->prepare("SELECT * FROM viajes_adelantos WHERE viaje_id = ?"); $adelantos->execute([$viajeId]);
+
+// 4. Obtener listas para los selectores de edición
+$stmt_pag = $pdo->prepare("SELECT id, razon_social FROM clientes WHERE transportista_id = ? AND es_pagador = 1"); $stmt_pag->execute([$active_company_id]);
+$lista_pagadores = $stmt_pag->fetchAll();
+$stmt_com = $pdo->prepare("SELECT id, razon_social FROM clientes WHERE transportista_id = ? AND es_comisionista = 1"); $stmt_com->execute([$active_company_id]);
+$lista_comisionistas = $stmt_com->fetchAll();
 ?>
 
 <div style="margin-bottom: 25px;">
@@ -118,7 +140,7 @@ $adelantos = $pdo->prepare("SELECT * FROM viajes_adelantos WHERE viaje_id = ?");
     <div style="display: flex; justify-content: space-between; align-items: center;">
         <h1>Viaje #<?= $v['id'] ?> <small style="font-size: 1rem; opacity: 0.6;">(<?= strtoupper($v['estado']) ?>)</small></h1>
         <div>
-            <?php if ($v['estado'] !== 'liquidado'): ?>
+            <?php if (!in_array($v['estado'], ['cobrado', 'liquidado'])): ?>
                 <?php if ($v['estado'] === 'en_viaje'): ?>
                     <button onclick="openModal('modal-descarga')" class="btn-primary" style="background:#2ecc71"><i class="fas fa-balance-scale"></i> Finalizar Descarga</button>
                 <?php endif; ?>
@@ -130,7 +152,7 @@ $adelantos = $pdo->prepare("SELECT * FROM viajes_adelantos WHERE viaje_id = ?");
                 <button onclick="prepararNuevoGasto()" class="btn-primary" style="background:#e67e22; margin-left:10px;"><i class="fas fa-gas-pump"></i> Cargar Gasto</button>
                 <button onclick="prepararNuevoAdelanto()" class="btn-primary" style="margin-left:10px;"><i class="fas fa-hand-holding-usd"></i> Dar Adelanto</button>
             <?php else: ?>
-                <span class="badge badge-secondary" style="padding: 10px 20px; font-size: 1rem;"><i class="fas fa-lock"></i> VIAJE LIQUIDADO</span>
+                <span class="badge badge-secondary" style="padding: 10px 20px; font-size: 1rem;"><i class="fas fa-lock"></i> FLETE CERRADO</span>
             <?php endif; ?>
         </div>
     </div>
@@ -142,7 +164,7 @@ $adelantos = $pdo->prepare("SELECT * FROM viajes_adelantos WHERE viaje_id = ?");
     </div>
 <?php endif; ?>
 
-<div style="display: grid; grid-template-columns: 1fr 2fr; gap: 25px;">
+ <div class="responsive-grid" style="display: grid; grid-template-columns: 1fr 2fr; gap: 25px;">
     <!-- Columna Izquierda: Info General -->
     <div>
         <div class="card" style="border-left: 4px solid var(--accent);">
@@ -202,6 +224,25 @@ $adelantos = $pdo->prepare("SELECT * FROM viajes_adelantos WHERE viaje_id = ?");
                 <hr style="opacity: 0.1; margin: 15px 0;">
                 <p style="color: #2ecc71; font-weight: bold;"><i class="fas fa-check-circle"></i> Saldo cerrado con el chofer.</p>
             <?php endif; ?>
+
+            <?php if ($v['estado'] !== 'en_viaje'): ?>
+                <div style="margin-top: 20px; padding: 15px; background: rgba(0,0,0,0.03); border-radius: 8px; border: 1px solid rgba(0,0,0,0.05);">
+                    <h4 style="margin-top:0; color: var(--primary);"><i class="fas fa-chart-pie"></i> Liquidación Empresa</h4>
+                    <div style="display: flex; justify-content: space-between; font-size: 0.9rem; margin-bottom: 5px;">
+                        <span>Comisión Terceros:</span> <span>- <?= formatMoney($comision_monto) ?></span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 0.9rem; margin-bottom: 5px;">
+                        <span>Pago Chofer:</span> <span>- <?= formatMoney($chofer_monto) ?></span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 0.9rem; margin-bottom: 5px;">
+                        <span>Gastos Empresa:</span> <span>- <?= formatMoney($gastos_empresa) ?></span>
+                    </div>
+                    <hr style="border: 0; border-top: 1px solid #ccc; margin: 10px 0;">
+                    <div style="display: flex; justify-content: space-between; font-weight: bold; color: var(--accent);">
+                        <span>Rentabilidad Neta:</span> <span><?= formatMoney($ganancia_neta_empresa) ?></span>
+                    </div>
+                </div>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -209,6 +250,7 @@ $adelantos = $pdo->prepare("SELECT * FROM viajes_adelantos WHERE viaje_id = ?");
     <div style="display: flex; flex-direction: column; gap: 25px;">
         <div class="card">
             <h3>Gastos de Viaje (Rendición)</h3>
+            <div class="table-container">
             <table class="data-table">
                 <thead><tr><th>Fecha</th><th>Tipo</th><th>Descripción</th><th style="text-align:right">Monto</th><th style="width: 50px;"></th></tr></thead>
                 <tbody>
@@ -222,7 +264,7 @@ $adelantos = $pdo->prepare("SELECT * FROM viajes_adelantos WHERE viaje_id = ?");
                             <td><?= htmlspecialchars($g['descripcion']) ?></td>
                             <td style="text-align:right"><?= formatMoney($g['monto']) ?></td>
                             <td>
-                                <?php if ($v['estado'] !== 'liquidado'): ?>
+                                <?php if (!in_array($v['estado'], ['cobrado', 'liquidado'])): ?>
                                     <button onclick='editGasto(<?= json_encode($g) ?>)' title="Editar" style="background:none; border:none; color:var(--accent); cursor:pointer;"><i class="fas fa-edit"></i></button>
                                     <button onclick='deleteGasto(<?= $g['id'] ?>)' title="Eliminar" style="background:none; border:none; color:#e74c3c; cursor:pointer;"><i class="fas fa-trash-alt"></i></button>
                                 <?php endif; ?>
@@ -232,10 +274,12 @@ $adelantos = $pdo->prepare("SELECT * FROM viajes_adelantos WHERE viaje_id = ?");
                 </tbody>
                 <tfoot><tr><th colspan="3" style="text-align:right">Total Gastos:</th><th style="text-align:right"><?= formatMoney($totalG) ?></th><th></th></tr></tfoot>
             </table>
+            </div>
         </div>
 
         <div class="card">
             <h3>Adelantos entregados al Chofer</h3>
+            <div class="table-container">
             <table class="data-table">
                 <thead><tr><th>Fecha</th><th>Método</th><th style="text-align:right">Monto</th><th style="width: 50px;"></th></tr></thead>
                 <tbody>
@@ -245,7 +289,7 @@ $adelantos = $pdo->prepare("SELECT * FROM viajes_adelantos WHERE viaje_id = ?");
                             <td><?= strtoupper($a['metodo_pago']) ?></td>
                             <td style="text-align:right"><?= formatMoney($a['monto']) ?></td>
                             <td>
-                                <?php if ($v['estado'] !== 'liquidado'): ?>
+                                <?php if (!in_array($v['estado'], ['cobrado', 'liquidado'])): ?>
                                     <button onclick='editAdelanto(<?= json_encode($a) ?>)' title="Editar" style="background:none; border:none; color:var(--accent); cursor:pointer;"><i class="fas fa-edit"></i></button>
                                     <button onclick='deleteAdelanto(<?= $a['id'] ?>)' title="Eliminar" style="background:none; border:none; color:#e74c3c; cursor:pointer;"><i class="fas fa-trash-alt"></i></button>
                                 <?php endif; ?>
@@ -255,6 +299,7 @@ $adelantos = $pdo->prepare("SELECT * FROM viajes_adelantos WHERE viaje_id = ?");
                 </tbody>
                 <tfoot><tr><th colspan="2" style="text-align:right">Total Adelantos:</th><th style="text-align:right"><?= formatMoney($totalA) ?></th><th></th></tr></tfoot>
             </table>
+            </div>
         </div>
     </div>
 </div>
@@ -388,13 +433,23 @@ $adelantos = $pdo->prepare("SELECT * FROM viajes_adelantos WHERE viaje_id = ?");
                         <input type="number" step="0.01" name="comision_valor" class="input-field" value="<?= $v['comision_valor'] ?>">
                     </div>
                     <div class="form-group">
-                        <label>A nombre de (Comisión)</label>
-                        <input type="text" name="comision_receptor" class="input-field" value="<?= htmlspecialchars($v['comision_receptor'] ?? '') ?>">
+                        <label>Comisionista</label>
+                        <select name="comisionista_id" class="input-field">
+                            <option value="">-- Sin comisión --</option>
+                            <?php foreach($lista_comisionistas as $c): ?>
+                                <option value="<?= $c['id'] ?>" <?= $v['comisionista_id'] == $c['id'] ? 'selected' : '' ?>><?= htmlspecialchars($c['razon_social']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
                     </div>
                 </div>
                 <div class="form-group">
                     <label>Pagador del Flete</label>
-                    <input type="text" name="pagador_flete" class="input-field" value="<?= htmlspecialchars($v['pagador_flete'] ?? '') ?>">
+                    <select name="pagador_id" class="input-field">
+                        <option value="">-- No especificado --</option>
+                        <?php foreach($lista_pagadores as $p): ?>
+                            <option value="<?= $p['id'] ?>" <?= $v['pagador_id'] == $p['id'] ? 'selected' : '' ?>><?= htmlspecialchars($p['razon_social']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
                 </div>
             </div>
             <div class="modal-footer">

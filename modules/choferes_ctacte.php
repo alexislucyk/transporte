@@ -19,12 +19,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     
     $pdo->beginTransaction();
     try {
-        $stmtV = $pdo->prepare("SELECT id, total_flete_neto, chofer_porcentaje, origen, destino FROM viajes WHERE id = ?");
+        $stmtV = $pdo->prepare("SELECT id, total_flete_neto, chofer_porcentaje, origen, destino, carta_porte_nro FROM viajes WHERE id = ?");
         $stmtV->execute([$vId]);
         $v = $stmtV->fetch();
 
-        $monto = ($v['total_flete_neto'] * $v['chofer_porcentaje']) / 100;
-        $detalle = "Acreditación Flete Viaje #{$v['id']} - {$v['origen']}/{$v['destino']} ({$v['chofer_porcentaje']}%)";
+        $monto = round(($v['total_flete_neto'] * $v['chofer_porcentaje']) / 100, 2);
+        $refCP = $v['carta_porte_nro'] ? "CP: {$v['carta_porte_nro']}" : "Viaje #{$v['id']}";
+        $detalle = "Acreditación Flete {$refCP} - {$v['origen']}/{$v['destino']} ({$v['chofer_porcentaje']}%)";
 
         // 1. Insertar el crédito real en la tabla de pagos
         $pdo->prepare("INSERT INTO chofer_pagos (chofer_id, fecha, monto, tipo, detalle) VALUES (?, ?, ?, 'liquidacion', ?)")
@@ -95,10 +96,12 @@ $pendientes = $pendientes_query->fetchAll();
 <div class="card" style="margin-bottom: 30px; border-top: 4px solid #f39c12;">
     <h3 style="margin-top: 0;"><i class="fas fa-clock"></i> Fletes Pendientes de Acreditar</h3>
     <p style="font-size: 0.9rem; opacity: 0.8;">Viajes con kilos confirmados que aún no se han sumado al saldo del chofer.</p>
+    <div class="table-container">
     <table class="data-table">
         <thead>
             <tr>
                 <th>Fecha</th>
+                <th>C. Porte</th>
                 <th>Ruta</th>
                 <th style="text-align:right">Flete Neto</th>
                 <th style="text-align:right">Ganancia (<?= $chofer['porcentaje_ganancia'] ?>%)</th>
@@ -111,20 +114,23 @@ $pendientes = $pendientes_query->fetchAll();
             ?>
             <tr>
                 <td><?= formatDate($vp['fecha_carga']) ?></td>
+                <td><strong><?= htmlspecialchars($vp['carta_porte_nro'] ?: '-') ?></strong></td>
                 <td><?= htmlspecialchars($vp['origen'] . " -> " . $vp['destino']) ?></td>
                 <td style="text-align:right"><?= formatMoney($vp['total_flete_neto']) ?></td>
                 <td style="text-align:right; font-weight:bold; color: #2ecc71;"><?= formatMoney($ganancia) ?></td>
                 <td style="text-align:center">
-                    <button onclick="confirmarAcreditacion(<?= $vp['id'] ?>, '<?= formatMoney($ganancia) ?>')" class="btn-primary" style="background:var(--accent); padding: 5px 12px; font-size: 0.85rem;">Acreditar Flete</button>
+                    <button onclick="confirmarAcreditacion(<?= $vp['id'] ?>, '<?= formatMoney($ganancia) ?>', '<?= htmlspecialchars($vp['carta_porte_nro'] ?: 'S/N') ?>')" class="btn-primary" style="background:var(--accent); padding: 5px 12px; font-size: 0.85rem;">Acreditar Flete</button>
                 </td>
             </tr>
             <?php endforeach; ?>
         </tbody>
     </table>
+    </div>
 </div>
 <?php endif; ?>
 
 <div class="card">
+    <div class="table-container">
     <table class="data-table">
         <thead>
             <tr>
@@ -151,6 +157,7 @@ $pendientes = $pendientes_query->fetchAll();
             <?php endforeach; ?>
         </tbody>
     </table>
+    </div>
 </div>
 
 <!-- Modal para Registrar Pago Manual -->
@@ -193,8 +200,8 @@ $pendientes = $pendientes_query->fetchAll();
 </form>
 
 <script>
-function confirmarAcreditacion(id, monto) {
-    appConfirm(`¿Deseas acreditar ${monto} a la cuenta corriente del chofer por este viaje?`, function() {
+function confirmarAcreditacion(id, monto, cp) {
+    appConfirm(`¿Deseas acreditar ${monto} al chofer por la Carta de Porte ${cp}?`, function() {
         document.getElementById('acreditar_viaje_id').value = id;
         document.getElementById('form-acreditar-flete').submit();
     }, "Acreditar Ganancia");

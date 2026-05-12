@@ -2,7 +2,7 @@
 define('DB_HOST', 'localhost');
 define('DB_NAME', 'trans_dev_db');
 define('DB_USER', 'root');
-define('DB_PASS', 'isidoro9'); 
+define('DB_PASS', ''); 
 
 try {
     $pdo = new PDO(

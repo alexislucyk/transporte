@@ -92,10 +92,12 @@ $lista_viajes = $viajes->fetchAll();
 <?php endif; ?>
 
 <div class="card">
+    <div class="table-container">
     <table class="data-table">
         <thead>
             <tr>
                 <th>Fecha</th>
+                <th>CP / Remito</th>
                 <th>Cliente</th>
                 <th>Chofer</th>
                 <th>Patente</th>
@@ -109,6 +111,12 @@ $lista_viajes = $viajes->fetchAll();
             <?php foreach($lista_viajes as $v): ?>
             <tr>
                 <td><?= formatDate($v['fecha_carga']) ?></td>
+                <td>
+                    <strong><?= htmlspecialchars($v['carta_porte_nro'] ?: '-') ?></strong>
+                    <?php if(!empty($v['otros_docs'])): ?>
+                        <br><small style="opacity:0.7; font-size: 0.75rem;"><?= htmlspecialchars($v['otros_docs']) ?></small>
+                    <?php endif; ?>
+                </td>
                 <td><?= htmlspecialchars($v['cliente']) ?></td>
                 <td><?= htmlspecialchars($v['chofer']) ?></td>
                 <td style="font-weight:bold"><?= $v['patente'] ?></td>
@@ -138,6 +146,7 @@ $lista_viajes = $viajes->fetchAll();
             <?php endforeach; ?>
         </tbody>
     </table>
+    </div>
 </div>
 
 <div id="modal-viaje" class="modal">

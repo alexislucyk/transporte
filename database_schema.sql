@@ -50,6 +50,9 @@ CREATE TABLE clientes (
     razon_social VARCHAR(150) NOT NULL,
     cuit VARCHAR(11) UNIQUE NOT NULL,
     direccion VARCHAR(255),
+    es_comercial BOOLEAN DEFAULT FALSE,
+    es_pagador BOOLEAN DEFAULT FALSE,
+    es_comisionista BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (transportista_id) REFERENCES transportistas(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
@@ -76,14 +79,17 @@ CREATE TABLE viajes (
     tarifa_tonelada DECIMAL(15,2) DEFAULT 0,
     total_flete_bruto DECIMAL(15,2) DEFAULT 0,
     total_flete_neto DECIMAL(15,2) DEFAULT 0,
-    chofer_porcentaje DECIMAL(5,2) DEFAULT 0,
+    chofer_porcentaje DECIMAL(5,2) DEFAULT 0, -- Se captura al momento de crear el viaje
+    acreditado_chofer BOOLEAN DEFAULT FALSE, -- Indica si ya impactó en Cta Cte
     comision_tipo ENUM('ninguna', 'porcentaje', 'monto_fijo') DEFAULT 'ninguna',
     comision_valor DECIMAL(15,2) DEFAULT 0,
-    comision_receptor VARCHAR(150) DEFAULT NULL,
+    comisionista_id INT DEFAULT NULL, -- Relación con clientes (comisionistas)
+    comision_receptor VARCHAR(150) DEFAULT NULL, -- Backup de texto
     ctg_nro VARCHAR(20), -- Argentina: Código de Trazabilidad de Granos
     carta_porte_nro VARCHAR(20),
     otros_docs VARCHAR(100) DEFAULT NULL,
-    pagador_flete VARCHAR(150) DEFAULT NULL,
+    pagador_id INT DEFAULT NULL, -- Relación con clientes
+    pagador_flete VARCHAR(150) DEFAULT NULL, -- Backup de texto
     factura_nro VARCHAR(50) DEFAULT NULL,
     factura_fecha DATE DEFAULT NULL,
     fecha_cobro DATE DEFAULT NULL,
@@ -95,6 +101,8 @@ CREATE TABLE viajes (
     FOREIGN KEY (cliente_id) REFERENCES clientes(id),
     FOREIGN KEY (chofer_id) REFERENCES choferes(id),
     FOREIGN KEY (vehiculo_id) REFERENCES vehiculos(id),
+    FOREIGN KEY (comisionista_id) REFERENCES clientes(id),
+    FOREIGN KEY (pagador_id) REFERENCES clientes(id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
@@ -149,4 +157,14 @@ CREATE TABLE IF NOT EXISTS chofer_pagos (
     tipo ENUM('adelanto', 'sueldo', 'liquidacion', 'otro') NOT NULL,
     detalle VARCHAR(255),
     FOREIGN KEY (chofer_id) REFERENCES choferes(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- 7. Pagos a Comisionistas (Terceros)
+CREATE TABLE IF NOT EXISTS comisionista_pagos (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    cliente_id INT NOT NULL, -- El comisionista es un cliente con flag es_comisionista
+    fecha DATE NOT NULL,
+    monto DECIMAL(15,2) NOT NULL,
+    detalle VARCHAR(255),
+    FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
