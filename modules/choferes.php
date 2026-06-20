@@ -65,10 +65,6 @@ $sql = "SELECT c.*,
             COALESCE((SELECT SUM(monto) FROM chofer_pagos WHERE chofer_id = c.id AND tipo = 'liquidacion'), 0) 
             - 
             COALESCE((SELECT SUM(monto) FROM chofer_pagos WHERE chofer_id = c.id AND tipo != 'liquidacion'), 0) 
-            + 
-            COALESCE((SELECT SUM(vg.monto) FROM viajes_gastos vg JOIN viajes v ON vg.viaje_id = v.id WHERE v.chofer_id = c.id AND vg.pagado_por = 'adelanto'), 0)
-            -
-            COALESCE((SELECT SUM(va.monto) FROM viajes_adelantos va JOIN viajes v ON va.viaje_id = v.id WHERE v.chofer_id = c.id), 0)
         ) as saldo
         FROM choferes c 
         WHERE c.transportista_id = ? 
@@ -89,16 +85,7 @@ $choferes = $stmt->fetchAll();
     </button>
 </div>
 
-<style>
-    .btn-primary { background: var(--accent); color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-weight: bold; }
-    .data-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-    .data-table th, .data-table td { text-align: left; padding: 12px; border-bottom: 1px solid rgba(0,0,0,0.05); }
-    .data-table th { background: rgba(0,0,0,0.02); color: var(--text); font-weight: bold; }
-    .badge { padding: 4px 8px; border-radius: 4px; font-size: 0.85rem; font-weight: bold; }
-    .badge-success { background: #2ecc71; color: white; }
-    .input-field { width: 100%; padding: 8px; margin-top: 5px; border-radius: 4px; border: 1px solid #ddd; background: var(--card); color: var(--text); }
-    .grid-form { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-</style>
+
 
 <?php if ($mensaje): ?>
     <div style="background: #d4edda; color: #155724; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #c3e6cb;">

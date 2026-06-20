@@ -1,0 +1,101 @@
+.modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); backdrop-filter: blur(3px); }
+.modal-content { background-color: var(--card); margin: 2vh auto; padding: 0; border-radius: 12px; width: 90%; max-width: 600px; max-height: 95vh; box-shadow: 0 10px 30px rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); overflow: hidden; display: flex; flex-direction: column; animation: animatetop 0.3s; }
+@keyframes animatetop { from {top:-300px; opacity:0} to {top:0; opacity:1} }
+
+.modal-header { padding: 8px 11px !important; /* Reducido 20% más */ background: var(--primary); color: white; display: flex; justify-content: space-between; align-items: center; }
+.modal-body { padding: 25px; color: var(--text); overflow-y: auto; flex: 1; }
+.modal-footer { padding: 15px 20px; text-align: right; background: rgba(0,0,0,0.02); border-top: 1px solid rgba(0,0,0,0.05); }
+
+.close-modal { color: white; font-size: 24px; cursor: pointer; opacity: 0.8; }
+.close-modal:hover { opacity: 1; }
+
+#confirmModal { z-index: 9999; }
+
+/* Modal general unificado */
+.modal { overflow: auto; }
+.modal-content { max-height: 92vh; }
+.modal-body { max-height: calc(92vh - 120px); overflow-y: auto; flex: 1; }
+.modal-footer { position: relative; }
+
+@media (max-height: 768px) {
+  .modal-content { margin-top: 1vh !important; margin-bottom: 1vh !important; border-radius: 10px; }
+  .modal-body { max-height: calc(92vh - 80px) !important; /* Ajustado para más espacio de scroll */ }
+}
+
+#modal-factura .modal-content { max-height: 92vh; }
+@media (max-height: 768px) {
+  #modal-factura .modal-content { max-width: 720px !important; width: 92% !important; }
+}
+
+/* UX: reducir tamaño de modales de cobranzas (cobranzas/liquidaciones) */
+#modal-liquidacion .modal-content,
+#modal-editar-viaje-liq .modal-content,
+#modal-editar-viaje .modal-content { /* Agregado para editar viaje */
+  max-width: 720px !important;
+  width: 95% !important;
+}
+
+#modal-gasto-liq .modal-content,
+#modal-adelanto-liq .modal-content {
+  max-width: 520px !important;
+  width: 95% !important;
+}
+
+#modal-factura .modal-content {
+  max-width: 760px !important;
+  width: 90% !important;
+}
+
+/* Distribución interna Modal Factura (opción B) */
+#modal-factura .form-factura-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 15px;
+}
+
+#modal-factura .factura-block-totales {
+  grid-column: 1 / span 1;
+}
+
+#modal-factura .factura-block-viajes {
+  grid-column: 2 / span 1;
+}
+
+#modal-factura .factura-block-retenciones {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 1024px) {
+  #modal-factura .form-factura-grid {
+    grid-template-columns: 1fr;
+  }
+
+  #modal-factura .factura-block-totales,
+  #modal-factura .factura-block-viajes,
+  #modal-factura .factura-block-retenciones {
+    grid-column: auto;
+  }
+}
+
+
+/* En pantallas chicas, recortar aún más */
+@media (max-width: 1024px) {
+  #modal-liquidacion .modal-content,
+  #modal-editar-viaje-liq .modal-content,
+  #modal-editar-viaje .modal-content { /* Agregado para editar viaje */
+    max-width: 640px !important;
+    width: 96% !important;
+  }
+
+  #modal-gasto-liq .modal-content,
+  #modal-adelanto-liq .modal-content {
+    max-width: 460px !important;
+    width: 96% !important;
+  }
+
+  #modal-factura .modal-content {
+    max-width: 760px !important;
+    width: 96% !important;
+  }
+}
+

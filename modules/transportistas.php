@@ -16,9 +16,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
     if ($_POST['action'] === 'nuevo') {
         try {
-            $sql = "INSERT INTO transportistas (razon_social, cuit, direccion, telefono, email) VALUES (?, ?, ?, ?, ?)";
+            $sql = "INSERT INTO transportistas (razon_social, cuit, direccion, telefono, email, created_by) VALUES (?, ?, ?, ?, ?, ?)";
             $stmt = $pdo->prepare($sql);
-            $stmt->execute([$razon_social, $cuit, $direccion, $telefono, $email]);
+            $stmt->execute([$razon_social, $cuit, $direccion, $telefono, $email, $_SESSION['user_id']]);
             $mensaje = "Empresa registrada exitosamente.";
         } catch (PDOException $e) {
             $error = ($e->getCode() == 23000) ? "Error: El CUIT ya existe." : "Error: " . $e->getMessage();
@@ -38,8 +38,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 }
 
 // --- OBTENER DATOS ---
-$stmt = $pdo->query("SELECT * FROM transportistas ORDER BY razon_social ASC");
-$empresas = $stmt->fetchAll();
+if ($_SESSION['user_role'] === 'developer') {
+    $stmt = $pdo->query("SELECT * FROM transportistas ORDER BY razon_social ASC");
+    $empresas = $stmt->fetchAll();
+} else {
+    $stmt = $pdo->prepare("SELECT * FROM transportistas WHERE created_by = ? ORDER BY razon_social ASC");
+    $stmt->execute([$_SESSION['user_id']]);
+    $empresas = $stmt->fetchAll();
+}
 ?>
 
 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">

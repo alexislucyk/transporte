@@ -1,0 +1,9 @@
+.badge { padding: 4px 8px; border-radius: 4px; font-size: 0.85rem; font-weight: bold; text-transform: uppercase; }
+
+.badge-success { background: #2ecc71 !important; color: white !important; }
+.badge-warning { background: #f39c12 !important; color: white !important; }
+.badge-danger { background: #e74c3c !important; color: white !important; }
+.badge-secondary { background: #95a5a6 !important; color: white !important; }
+.badge-primary { background: var(--accent) !important; color: white !important; }
+.badge-info { background: var(--accent) !important; color: white !important; }
+

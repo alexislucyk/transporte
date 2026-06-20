@@ -1,0 +1,11 @@
+body { font-family: 'Segoe UI', sans-serif; background: #f4f7f6; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+.login-card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 100%; max-width: 288px; text-align: center; }
+.login-card h1 { color: #2c3e50; margin-bottom: 7px; font-size: 1.3rem; }
+.login-card p { color: #7f8c8d; margin-bottom: 20px; }
+.form-group { text-align: left; margin-bottom: 15px; }
+.form-group label { display: block; margin-bottom: 6px; font-weight: bold; color: #34495e; }
+.input-field { width: 100%; padding: 9px; border-radius: 6px; border: 1px solid #ddd; box-sizing: border-box; font-size: 0.75rem; }
+.btn-login { width: 100%; padding: 9px; background: #3498db; color: white; border: none; border-radius: 6px; font-size: 0.75rem; font-weight: bold; cursor: pointer; transition: 0.3s; }
+.btn-login:hover { background: #2980b9; }
+.error-msg { background: #f8d7da; color: #721c24; padding: 7px; border-radius: 6px; margin-bottom: 15px; font-size: 0.65rem; }
+.login-logo { width: 100%; max-width: 220px; height: auto; margin-bottom: 20px; }

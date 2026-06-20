@@ -67,18 +67,6 @@ $lista_viajes = $viajes->fetchAll();
     <button onclick="openModal('modal-viaje')" class="btn-primary"><i class="fas fa-route"></i> Nuevo Viaje</button>
 </div>
 
-<style>
-    /* Estilos para que el modal sea responsivo */
-    .form-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 15px;
-    }
-    @media (max-width: 768px) {
-        .modal-content { width: 95% !important; margin: 2% auto !important; }
-    }
-</style>
-
 <?php if ($mensaje): ?>
     <div style="background: #d4edda; color: #155724; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #c3e6cb;">
         <i class="fas fa-check-circle"></i> <?= $mensaje ?>
@@ -92,12 +80,10 @@ $lista_viajes = $viajes->fetchAll();
 <?php endif; ?>
 
 <div class="card">
-    <div class="table-container">
     <table class="data-table">
         <thead>
             <tr>
                 <th>Fecha</th>
-                <th>CP / Remito</th>
                 <th>Cliente</th>
                 <th>Chofer</th>
                 <th>Patente</th>
@@ -111,12 +97,6 @@ $lista_viajes = $viajes->fetchAll();
             <?php foreach($lista_viajes as $v): ?>
             <tr>
                 <td><?= formatDate($v['fecha_carga']) ?></td>
-                <td>
-                    <strong><?= htmlspecialchars($v['carta_porte_nro'] ?: '-') ?></strong>
-                    <?php if(!empty($v['otros_docs'])): ?>
-                        <br><small style="opacity:0.7; font-size: 0.75rem;"><?= htmlspecialchars($v['otros_docs']) ?></small>
-                    <?php endif; ?>
-                </td>
                 <td><?= htmlspecialchars($v['cliente']) ?></td>
                 <td><?= htmlspecialchars($v['chofer']) ?></td>
                 <td style="font-weight:bold"><?= $v['patente'] ?></td>
@@ -140,20 +120,21 @@ $lista_viajes = $viajes->fetchAll();
                     </span>
                 </td>
                 <td>
-                    <a href="viajes/detalle/<?= $v['id'] ?>" title="Ver Detalle" style="color:var(--accent);"><i class="fas fa-eye"></i></a>
+                    <a href="viajes/detalle/<?= $v['id'] ?>" class="btn-primary" style="padding: 6px 12px; font-size: 0.85rem;">
+                        <i class="fas fa-search-plus"></i> Gestionar
+                    </a>
                 </td>
             </tr>
             <?php endforeach; ?>
         </tbody>
     </table>
-    </div>
 </div>
 
 <div id="modal-viaje" class="modal">
-    <div class="modal-content" style="width: 90%; max-width: 900px; max-height: 95vh; display: flex; flex-direction: column;">
+    <div class="modal-content" style="max-width: 900px;">
         <div class="modal-header"><h3>Registrar Nuevo Viaje</h3><span class="close-modal" onclick="closeModal('modal-viaje')">&times;</span></div>
-        <form method="POST" style="overflow: hidden; display: flex; flex-direction: column;">
-            <div class="modal-body" style="overflow-y: auto; flex: 1;">
+        <form method="POST">
+            <div class="modal-body">
                 <input type="hidden" name="action" value="nuevo">
                 <div class="form-grid">
                     <div class="form-group">

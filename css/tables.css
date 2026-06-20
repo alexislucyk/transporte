@@ -1,0 +1,8 @@
+.data-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+.data-table th, .data-table td { text-align: left; padding: 12px; border-bottom: 1px solid rgba(0,0,0,0.05); }
+.data-table th { background: rgba(0,0,0,0.02); color: var(--text); font-weight: bold; }
+
+.data-table td, .data-table th { white-space: nowrap; }
+
+.table-container { overflow-x: auto; }
+

@@ -1,7 +1,10 @@
-RewriteEngine On
-RewriteBase /trans_dev/
-
-# Redirigir todas las peticiones al index.php a menos que sea un archivo real (imagen/css)
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^(.*)$ index.php?route=$1 [L,QSA]
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    
+    # Si el archivo o carpeta solicitado existe físicamente, úsalo directamente
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    
+    # De lo contrario, envía todo a index.php pasando la ruta como parámetro
+    RewriteRule ^(.*)$ index.php?route=$1 [L,QSA]
+</IfModule>

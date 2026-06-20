@@ -279,14 +279,21 @@ $lista_comisionistas = $pdo->prepare("SELECT id, razon_social FROM clientes WHER
 $lista_comisionistas->execute([$active_company_id]);
 ?>
 
-<h1>Gestión de Cobranzas y Liquidaciones</h1>
-<p>Central de movimientos post-viaje.</p>
+<h1>Cobranzas y Liquidaciones</h1>
 
 <?php if ($mensaje): ?><div class="card" style="background:#d4edda; color:#155724; border:1px solid #c3e6cb; margin-bottom:20px;"><i class="fas fa-check-circle"></i> <?= $mensaje ?></div><?php endif; ?>
 <?php if ($error): ?><div class="card" style="background:#f8d7da; color:#721c24; border:1px solid #f5c6cb; margin-bottom:20px;"><i class="fas fa-exclamation-triangle"></i> <?= $error ?></div><?php endif; ?>
 
 <div class="card" style="margin-bottom: 30px; border-top: 4px solid var(--accent);">
-    <h3>Viajes Pendientes de Cierre</h3>
+    <h3 style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+        <span>Viajes Pendientes de Cierre</span>
+        <a class="btn-primary" href="?route=cobranzas_fletes_pendientes" style="background:var(--accent); padding:6px 14px; font-size:0.9rem; text-decoration:none;">
+            <i class="fas fa-money-bill-wave"></i> Fletes Pendientes de Cobro
+        </a>
+    </h3>
+
+
+
     <div class="table-container">
         <table class="data-table">
             <thead>
@@ -299,7 +306,12 @@ $lista_comisionistas->execute([$active_company_id]);
                     <td><?= htmlspecialchars($p['cliente']) ?></td>
                     <td style="text-align:right;"><?= $p['acreditado_chofer'] ? '<span class="badge badge-success">ACREDITADO</span>' : formatMoney($gan_est) ?></td>
                     <td style="text-align:right;"><?php if(!$p['comisionista_id']): echo '-'; elseif($p['comision_pagada']): echo '<span class="badge badge-success">PAGADA</span>'; else: echo formatMoney(($p['comision_tipo'] == 'porcentaje' ? ($p['total_flete_neto'] * $p['comision_valor'] / 100) : $p['comision_valor'])); endif; ?></td>
-                    <td style="text-align:center;"><button onclick="abrirModalLiquidacion(<?= $p['id'] ?>)" class="btn-primary" style="padding:5px 12px; font-size:0.85rem;"><i class="fas fa-calculator"></i> Liquidar</button></td>
+                    <td style="text-align:center;">
+                        <a class="btn-primary" href="?route=cobranzas_fletes_liquidar&viaje_id=<?= (int)$p['id'] ?>" style="background:#2c3e50; padding:5px 12px; font-size:0.85rem; text-decoration:none; display:inline-flex; align-items:center; gap:8px;">
+                            <i class="fas fa-calculator"></i> Liquidar
+                        </a>
+                    </td>
+
                 </tr>
                 <?php endforeach; if(empty($lista_cierre)): ?><tr><td colspan="5" style="text-align:center; opacity:0.6;">Sin cierres pendientes.</td></tr><?php endif; ?>
             </tbody>
@@ -307,27 +319,6 @@ $lista_comisionistas->execute([$active_company_id]);
     </div>
 </div>
 
-<div class="card" style="margin-bottom: 30px;">
-    <h3>Fletes Facturados Pendientes de Cobro</h3>
-    <div class="table-container">
-        <table class="data-table">
-            <thead><tr><th>CP/Remito</th><th>Cliente</th><th>Emisión</th><th>Factura</th><th style="text-align:right">Importe</th><th style="text-align:center">Acción</th></tr></thead>
-            
-            <tbody>
-                <?php foreach($lista_cobro as $c): ?>
-                <tr>
-                    <td><span class="badge badge-info"><?= htmlspecialchars($c['carta_porte_nro'] ?: ($c['otros_docs'] ?: 'S/D')) ?></span></td>
-                    <td><?= htmlspecialchars($c['cliente']) ?></td>
-                    <td><?= formatDate($c['factura_fecha']) ?></td>
-                    <td><strong style="color:var(--accent)"><?= $c['factura_nro'] ?></strong></td>
-                    <td style="text-align:right; font-weight:bold;"><?= formatMoney($c['total_flete_neto']) ?></td>
-                    <td style="text-align:center;"><button onclick="registrarCobroManual(<?= $c['id'] ?>, '<?= $c['factura_nro'] ?>')" class="btn-primary" style="background:#2ecc71; padding:5px 12px; font-size:0.85rem;"><i class="fas fa-money-bill-wave"></i> Cobrado</button></td>
-                </tr>
-                <?php endforeach; if(empty($lista_cobro)): ?><tr><td colspan="6" style="text-align:center; opacity:0.6;">Sin facturas pendientes de cobro.</td></tr><?php endif; ?>
-            </tbody>
-        </table>
-    </div>
-</div>
 
 <!-- Modal Liquidación Detallada -->
 <div id="modal-liquidacion" class="modal" style="z-index: 1001;">
