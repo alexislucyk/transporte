@@ -121,6 +121,12 @@ $lista_comisionistas->execute([$active_company_id]);
         <div class="card" style="margin-bottom: 20px; padding:12px; background:rgba(0,0,0,0.02);">
             <h3 style="margin:0 0 10px 0;"><i class="fas fa-wallet"></i> Rendición de Fondos (Chofer)</h3>
             <div id="liq_detalles_fondos" style="font-size:0.95rem; margin-bottom:15px; padding:10px; background:rgba(0,0,0,0.02); border-radius:5px;"></div>
+
+            <div style="margin: 0 0 15px; padding:10px; border:1px dashed rgba(0,0,0,0.15); border-radius:6px; background:rgba(0,0,0,0.01);">
+                <div style="font-weight:bold; margin-bottom:6px;">Datos de Facturación (para el viaje)</div>
+                <div id="liq_factura_info_operativos" style="opacity:0.95; font-size:0.95rem;">—</div>
+            </div>
+
             <div class="form-grid" style="margin-bottom:15px;">
                 <button onclick="prepararNuevoGastoLiq()" class="btn-primary" style="background:#e67e22;">
                     <i class="fas fa-gas-pump"></i> Cargar Gasto
@@ -134,12 +140,6 @@ $lista_comisionistas->execute([$active_company_id]);
         </div>
 
         <div class="form-grid">
-            <div class="card" style="background:rgba(0,0,0,0.02); border-left:4px solid #3498db; padding:12px;">
-                <h3 style="margin:0 0 10px 0;"><i class="fas fa-file-invoice"></i> Facturación</h3>
-                <p id="liq_factura_info" style="margin:0;"></p>
-                <div id="btn_area_factura" style="margin-top:10px;"></div>
-            </div>
-
             <div class="card" style="background:rgba(0,0,0,0.02); border-left:4px solid #2ecc71; padding:12px;">
                 <h3 style="margin:0 0 10px 0;"><i class="fas fa-money-bill-wave"></i> Cobro</h3>
                 <p id="liq_cobro_info" style="margin:0;"></p>
@@ -201,10 +201,11 @@ $lista_comisionistas->execute([$active_company_id]);
     </div>
 
     <!-- Modal Factura (migrado desde modules/cobranzas.php) -->
-    <div id="modal-factura" class="modal" style="z-index: 1003;">
+    <div id="modal-factura" class="modal" style="z-index: 1003; display:none;">
 
         <div class="modal-content" style="max-width: 900px;">
             <div class="modal-header"><h3>Registrar Facturación</h3><span class="close-modal" onclick="closeModal('modal-factura')">&times;</span></div>
+
 
             <form method="POST" id="form-factura-detallada">
                 <div class="modal-body">
@@ -390,10 +391,44 @@ $lista_comisionistas->execute([$active_company_id]);
                     document.getElementById('btn_area_comision').innerHTML = '';
                 }
 
-                document.getElementById('liq_factura_info').innerHTML = `Cliente: <strong>${v.cliente_razon_social}</strong><br>Flete Neto: <strong>${formatMoneyJS(v.total_flete_neto)}</strong>`;
-                document.getElementById('btn_area_factura').innerHTML = v.factura_nro 
-                    ? `<span class="badge badge-success" style="display:block; padding:8px; margin-top:10px;">FACTURA: ${v.factura_nro}</span>`
-                    : `<button onclick="abrirModalFactura(${id}, '${v.cliente_razon_social.replace(/'/g, "\\'")}', ${v.total_flete_neto}, '${v.carta_porte_nro || 'S/D'}')" class="btn-primary" style="width:100%; margin-top:10px; background:#3498db;"><i class="fas fa-file-invoice"></i> Generar Factura</button>`;
+        // Datos de facturación visibles en la card principal (operativos)
+                const facturaOperativos = document.getElementById('liq_factura_info_operativos');
+                if (facturaOperativos) {
+                    const fleteNeto = (v.total_flete_neto ?? 0);
+                    const fleteBruto = (v.total_flete_bruto ?? null);
+                    const tarifaTon = (v.tarifa_tonelada ?? null);
+
+                    facturaOperativos.innerHTML = `
+                        Cliente: <strong>${v.cliente_razon_social || '-'}</strong><br>
+                        Tarifa (x ton): <strong>${tarifaTon !== null ? formatMoneyJS(tarifaTon) : '-'}</strong><br>
+                        Flete Neto: <strong>${formatMoneyJS(fleteNeto)}</strong><br>
+                        ${fleteBruto !== null ? `Flete Bruto/Importe total: <strong>${formatMoneyJS(fleteBruto)}</strong><br>` : ''}
+                        CP: <strong>${v.carta_porte_nro || 'S/D'}</strong><br>
+                        Estado: <strong>${v.estado ? v.estado.toUpperCase() : '-'}</strong><br>
+                        Fecha cobro: <strong>${v.fecha_cobro ? formatDateJS(v.fecha_cobro) : '-'}</strong>
+                    `;
+                }
+
+
+                // Botón de facturación (si ya existe btn_area_factura en otro contenedor)
+                // En esta pantalla ya no mostramos la card aparte de Facturación.
+                // Se mantiene el modal, pero el botón lo dejamos fuera por ahora.
+                if (document.getElementById('btn_area_factura')) {
+                    document.getElementById('btn_area_factura').innerHTML = v.factura_nro 
+                        ? `<span class="badge badge-success" style="display:block; padding:8px; margin-top:10px;">FACTURA: ${v.factura_nro}</span>`
+                        : `<button onclick="abrirModalFactura(${id}, '${v.cliente_razon_social.replace(/'/g, "\\'")}', ${v.total_flete_neto}, '${v.carta_porte_nro || 'S/D'}')" class="btn-primary" style="width:100%; margin-top:10px; background:#3498db;"><i class="fas fa-file-invoice"></i> Generar Factura</button>`;
+                }
+
+                // Resumen de facturación (en card Datos Operativos)
+                const previewBox = document.getElementById('liq_factura_preview');
+                const previewText = document.getElementById('liq_factura_preview_text');
+                if (previewBox && previewText) {
+                    const facturaPreviewText = v.factura_nro
+                        ? `Cliente: ${v.cliente_razon_social}<br>Flete Neto: ${formatMoneyJS(v.total_flete_neto)}`
+                        : `Sin factura generada.`;
+                    previewText.innerHTML = facturaPreviewText;
+                    previewBox.style.display = v.factura_nro ? 'block' : 'none';
+                }
 
                 document.getElementById('liq_cobro_info').innerHTML = `Estado: <strong>${v.estado.toUpperCase()}</strong><br>Fecha: <strong>${formatDateJS(v.fecha_cobro)}</strong>`;
                 document.getElementById('btn_area_cobro').innerHTML = v.estado === 'facturado'
