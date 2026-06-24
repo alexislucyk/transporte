@@ -17,8 +17,8 @@ if (isset($_GET['get_viaje_info'])) {
                 CONCAT(ch.apellido, ', ', ch.nombre) as chofer_nombre, 
                 cli.razon_social as cliente_razon_social, 
                 ccom.razon_social as comisionista_nombre,
-                (SELECT COALESCE(SUM(monto),0) FROM viajes_adelantos WHERE viaje_id = v.id) as total_adelantos,
-                (SELECT COALESCE(SUM(monto),0) FROM viajes_gastos WHERE viaje_id = v.id AND pagado_por = 'adelanto') as gastos_rendidos
+                (SELECT COALESCE(SUM(monto),0) FROM viajes_adelantos WHERE viaje_id = v.id AND activo = 1) as total_adelantos,
+                (SELECT COALESCE(SUM(monto),0) FROM viajes_gastos WHERE viaje_id = v.id AND pagado_por = 'adelanto' AND activo = 1) as gastos_rendidos
             FROM viajes v 
             JOIN choferes ch ON v.chofer_id = ch.id 
             LEFT JOIN clientes cli ON v.cliente_id = cli.id
@@ -30,11 +30,11 @@ if (isset($_GET['get_viaje_info'])) {
 
         if (!$viaje_data) throw new Exception("Viaje no encontrado.");
         
-        $stmtG = $pdo->prepare("SELECT id, fecha, tipo_gasto, monto, pagado_por, descripcion FROM viajes_gastos WHERE viaje_id = ? ORDER BY fecha ASC");
+        $stmtG = $pdo->prepare("SELECT id, fecha, tipo_gasto, monto, pagado_por, descripcion FROM viajes_gastos WHERE viaje_id = ? AND activo = 1 ORDER BY fecha ASC");
         $stmtG->execute([$id]);
         $gastos = $stmtG->fetchAll();
         
-        $stmtA = $pdo->prepare("SELECT id, fecha, monto, metodo_pago FROM viajes_adelantos WHERE viaje_id = ? ORDER BY fecha ASC");
+        $stmtA = $pdo->prepare("SELECT id, fecha, monto, metodo_pago FROM viajes_adelantos WHERE viaje_id = ? AND activo = 1 ORDER BY fecha ASC");
         $stmtA->execute([$id]);
         $adelantos = $stmtA->fetchAll();
         
@@ -167,7 +167,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // (Se evita cualquier UPDATE a `estado` acá.)
 
 
-            $stmtV = $pdo->prepare("SELECT v.*, (SELECT COALESCE(SUM(monto),0) FROM viajes_adelantos WHERE viaje_id = v.id) as total_adelantos, (SELECT COALESCE(SUM(monto),0) FROM viajes_gastos WHERE viaje_id = v.id AND pagado_por = 'adelanto') as gastos_rendidos FROM viajes v WHERE v.id = ?");
+            $stmtV = $pdo->prepare("SELECT v.*, (SELECT COALESCE(SUM(monto),0) FROM viajes_adelantos WHERE viaje_id = v.id AND activo = 1) as total_adelantos, (SELECT COALESCE(SUM(monto),0) FROM viajes_gastos WHERE viaje_id = v.id AND pagado_por = 'adelanto' AND activo = 1) as gastos_rendidos FROM viajes v WHERE v.id = ?");
             $stmtV->execute([$viajeId]);
             $v = $stmtV->fetch();
 
@@ -268,7 +268,7 @@ $pendientes_cobro->execute([$active_company_id]);
 $lista_cobro = $pendientes_cobro->fetchAll();
 
 // Historial de rentabilidad
-$rentabilidad = $pdo->prepare("SELECT v.*, c.razon_social as cliente, (SELECT COALESCE(SUM(monto),0) FROM viajes_gastos WHERE viaje_id = v.id AND pagado_por = 'empresa') as total_gastos_empresa FROM viajes v JOIN clientes c ON v.cliente_id = c.id WHERE v.transportista_id = ? AND v.estado IN ('cobrado', 'liquidado', 'descargado', 'facturado') ORDER BY v.fecha_cobro DESC LIMIT 10");
+$rentabilidad = $pdo->prepare("SELECT v.*, c.razon_social as cliente, (SELECT COALESCE(SUM(monto),0) FROM viajes_gastos WHERE viaje_id = v.id AND pagado_por = 'empresa' AND activo = 1) as total_gastos_empresa FROM viajes v JOIN clientes c ON v.cliente_id = c.id WHERE v.transportista_id = ? AND v.estado IN ('cobrado', 'liquidado', 'descargado', 'facturado') ORDER BY v.fecha_cobro DESC LIMIT 10");
 $rentabilidad->execute([$active_company_id]);
 $lista_rentabilidad = $rentabilidad->fetchAll();
 

@@ -14,7 +14,6 @@ if ($action === 'detalle' && isset($params[0])) {
 // --- PROCESAR ALTA ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'nuevo') {
     try {
-        // Obtener el porcentaje actual del chofer para congelarlo en el viaje
         $stmt_ch = $pdo->prepare("SELECT porcentaje_ganancia FROM choferes WHERE id = ?");
         $stmt_ch->execute([$_POST['chofer_id']]);
         $porcentaje_actual = $stmt_ch->fetchColumn() ?: 0;
@@ -33,12 +32,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     } catch (PDOException $e) { $error = "Error: " . $e->getMessage(); }
 }
 
+// --- PROCESAR ELIMINACIÓN LÓGICA ---
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'eliminar_viaje' && isset($_POST['viaje_id'])) {
+    try {
+        $pdo->beginTransaction();
+        
+        $viajeId = (int)$_POST['viaje_id'];
+        
+        // 1. Marcar gastos como inactivos
+        $pdo->prepare("UPDATE viajes_gastos SET activo = 0 WHERE viaje_id = ?")->execute([$viajeId]);
+        
+        // 2. Marcar adelantos como inactivos
+        $pdo->prepare("UPDATE viajes_adelantos SET activo = 0 WHERE viaje_id = ?")->execute([$viajeId]);
+        
+        // 3. Eliminar vínculos con facturas (pero no borrar la factura en sí)
+        $pdo->prepare("DELETE FROM facturas_fletes_viajes WHERE viaje_id = ?")->execute([$viajeId]);
+        
+        // 4. Marcar el viaje como inactivo
+        $pdo->prepare("UPDATE viajes SET activo = 0 WHERE id = ? AND transportista_id = ?")->execute([$viajeId, $active_company_id]);
+        
+        $pdo->commit();
+        $mensaje = "Viaje eliminado correctamente. Se ocultaron gastos, adelantos y se desvincularon facturas relacionadas.";
+    } catch (PDOException $e) { 
+        $pdo->rollBack();
+        $error = "Error: " . $e->getMessage(); 
+    }
+}
+
 // --- CARGAR SELECTORES ---
-// 1. Clientes Comerciales (Dadores de carga)
 $stmt_cli = $pdo->prepare("SELECT id, razon_social FROM clientes WHERE transportista_id = ? AND es_comercial = 1"); $stmt_cli->execute([$active_company_id]);
 $lista_comerciales = $stmt_cli->fetchAll();
 
-// 2. Pagadores y Comisionistas
 $stmt_pag = $pdo->prepare("SELECT id, razon_social FROM clientes WHERE transportista_id = ? AND es_pagador = 1"); $stmt_pag->execute([$active_company_id]);
 $lista_pagadores = $stmt_pag->fetchAll();
 $stmt_com = $pdo->prepare("SELECT id, razon_social FROM clientes WHERE transportista_id = ? AND es_comisionista = 1"); $stmt_com->execute([$active_company_id]);
@@ -47,17 +71,17 @@ $lista_comisionistas = $stmt_com->fetchAll();
 $stmt_cho = $pdo->prepare("SELECT id, nombre, apellido FROM choferes WHERE transportista_id = ? AND activo = 1"); $stmt_cho->execute([$active_company_id]);
 $lista_choferes = $stmt_cho->fetchAll();
 
-// Camiones y Acoplados por separado
 $stmt_cam = $pdo->prepare("SELECT id, dominio, chofer_id, acoplado FROM vehiculos WHERE transportista_id = ?"); $stmt_cam->execute([$active_company_id]);
 $lista_camiones = $stmt_cam->fetchAll();
 
-// --- LISTADO ---
+// --- LISTADO (solo activos) ---
 $viajes = $pdo->prepare("SELECT v.*, c.razon_social as cliente, CONCAT(ch.apellido, ', ', ch.nombre) as chofer, ve.dominio as patente 
                          FROM viajes v 
                          JOIN clientes c ON v.cliente_id = c.id 
                          JOIN choferes ch ON v.chofer_id = ch.id 
                          JOIN vehiculos ve ON v.vehiculo_id = ve.id 
-                         WHERE v.transportista_id = ? ORDER BY v.fecha_carga DESC");
+                         WHERE v.transportista_id = ? AND (v.activo IS NULL OR v.activo = 1) 
+                         ORDER BY v.fecha_carga DESC");
 $viajes->execute([$active_company_id]);
 $lista_viajes = $viajes->fetchAll();
 ?>
@@ -85,7 +109,7 @@ $lista_viajes = $viajes->fetchAll();
             <tr>
                 <th>Fecha</th>
                 <th>Cliente</th>
-                <th>Chofer</th>
+                <th>CTG / CP / Remito</th>
                 <th>Patente</th>
                 <th>Ruta</th>
                 <th>Flete Est.</th>
@@ -98,31 +122,48 @@ $lista_viajes = $viajes->fetchAll();
             <tr>
                 <td><?= formatDate($v['fecha_carga']) ?></td>
                 <td><?= htmlspecialchars($v['cliente']) ?></td>
-                <td><?= htmlspecialchars($v['chofer']) ?></td>
+                <td>
+                    <?php
+                    $doc = '';
+                    if (!empty($v['ctg_nro'])) {
+                        $doc = 'CTG: ' . $v['ctg_nro'];
+                    } elseif (!empty($v['carta_porte_nro'])) {
+                        $doc = 'CP: ' . $v['carta_porte_nro'];
+                    } elseif (!empty($v['otros_docs'])) {
+                        $doc = 'Remito: ' . $v['otros_docs'];
+                    } else {
+                        $doc = '-';
+                    }
+                    ?>
+                    <?= htmlspecialchars($doc) ?>
+                </td>
                 <td style="font-weight:bold"><?= $v['patente'] ?></td>
                 <td><?= htmlspecialchars($v['origen'] . " -> " . $v['destino']) ?></td>
                 <td><?= formatMoney($v['total_flete_bruto']) ?></td>
                 <td>
                     <?php
-                    $badgeClass = 'badge-info'; // en_viaje
+                    $badgeClass = 'badge-info';
                     if ($v['estado'] == 'descargado') $badgeClass = 'badge-success';
                     if ($v['estado'] == 'facturado') $badgeClass = 'badge-warning';
-                    if ($v['estado'] == 'cobrado') $badgeClass = 'badge-primary'; // Nuevo color para cobrado
+                    if ($v['estado'] == 'cobrado') $badgeClass = 'badge-primary';
                     if ($v['estado'] == 'liquidado') $badgeClass = 'badge-secondary';
                     ?>
                     <style>
                         .badge-warning { background: #f39c12 !important; color: white !important; }
                         .badge-secondary { background: #95a5a6 !important; color: white !important; }
-                        .badge-primary { background: var(--accent) !important; color: white !important; } /* Usar el color de acento */
+                        .badge-primary { background: var(--accent) !important; color: white !important; }
                     </style>
                     <span class="badge <?= $badgeClass ?>">
                         <?= str_replace('_', ' ', strtoupper($v['estado'] ?? 'PENDIENTE')) ?>
                     </span>
                 </td>
-                <td>
-                    <a href="viajes/detalle/<?= $v['id'] ?>" class="btn-primary" style="padding: 6px 12px; font-size: 0.85rem;">
-                        <i class="fas fa-search-plus"></i> Gestionar
+                <td style="white-space:nowrap;">
+                        <a href="viajes/detalle/<?= $v['id'] ?>" class="liq-icon-btn liq-icon-btn--edit" title="Gestionar viaje">
+                        <i class="fa-solid fa-sliders"></i>
                     </a>
+                    <button onclick="confirmarEliminarViaje(<?= $v['id'] ?>)" class="liq-icon-btn liq-icon-btn--delete" title="Eliminar viaje">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
                 </td>
             </tr>
             <?php endforeach; ?>
@@ -234,6 +275,12 @@ $lista_viajes = $viajes->fetchAll();
     </div>
 </div>
 
+<!-- Formulario oculto para eliminación -->
+<form id="form-eliminar-viaje" method="POST" style="display:none;">
+    <input type="hidden" name="action" value="eliminar_viaje">
+    <input type="hidden" name="viaje_id" id="eliminar-viaje-id">
+</form>
+
 <script>
 function sugerirChofer(select) {
     const choferId = select.options[select.selectedIndex].getAttribute('data-chofer');
@@ -244,6 +291,15 @@ function sugerirChofer(select) {
     }
     if (acopladoDato) {
         document.getElementById('aco-input').value = acopladoDato;
+    }
+}
+
+function confirmarEliminarViaje(id) {
+    if (typeof appConfirm === 'function') {
+        appConfirm("¿Estás seguro de eliminar este viaje? Se ocultará del listado.", () => {
+            document.getElementById('eliminar-viaje-id').value = id;
+            document.getElementById('form-eliminar-viaje').submit();
+        }, "Eliminar Viaje");
     }
 }
 </script>

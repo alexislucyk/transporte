@@ -1,17 +1,15 @@
 <?php
 /**
  * Cobranzas - Fletes (Liquidación)
- * Pantalla nueva (antes era modal dentro de modules/cobranzas.php)
+ * Refactor completo.
+ *
+ * Conserva el endpoint AJAX: ?route=cobranzas_fletes_liquidar&get_viaje_info={id}
  */
 
 $mensaje = "";
 $error = "";
 $active_company_id = $_SESSION['active_company_id'] ?? null;
 $viaje_id = isset($_GET['viaje_id']) ? (int)$_GET['viaje_id'] : 0;
-
-if ($viaje_id <= 0) {
-    $error = 'No se recibió un viaje válido para liquidar.';
-}
 
 // --- API INTERNA PARA DETALLES (AJAX) ---
 if (isset($_GET['get_viaje_info'])) {
@@ -25,7 +23,7 @@ if (isset($_GET['get_viaje_info'])) {
                 CONCAT(ch.apellido, ', ', ch.nombre) as chofer_nombre,
                 cli.razon_social as cliente_razon_social,
                 ccom.razon_social as comisionista_nombre,
-                (SELECT COALESCE(SUM(monto),0) FROM viajes_adelantos WHERE viaje_id = v.id) as total_adelantos,
+(SELECT COALESCE(SUM(monto),0) FROM viajes_adelantos WHERE viaje_id = v.id) as total_adelantos,
                 (SELECT COALESCE(SUM(monto),0) FROM viajes_gastos WHERE viaje_id = v.id AND pagado_por = 'adelanto') as gastos_rendidos
             FROM viajes v 
             JOIN choferes ch ON v.chofer_id = ch.id 
@@ -41,11 +39,11 @@ if (isset($_GET['get_viaje_info'])) {
             throw new Exception("Viaje no encontrado.");
         }
 
-        $stmtG = $pdo->prepare("SELECT id, fecha, tipo_gasto, monto, pagado_por, descripcion FROM viajes_gastos WHERE viaje_id = ? ORDER BY fecha ASC");
+$stmtG = $pdo->prepare("SELECT id, fecha, tipo_gasto, monto, pagado_por, descripcion FROM viajes_gastos WHERE viaje_id = ? ORDER BY fecha ASC");
         $stmtG->execute([$id]);
         $gastos = $stmtG->fetchAll();
 
-        $stmtA = $pdo->prepare("SELECT id, fecha, monto, metodo_pago FROM viajes_adelantos WHERE viaje_id = ? ORDER BY fecha ASC");
+        $stmtA = $pdo->prepare("SELECT id, fecha, monto, metodo_pago FROM viajes_adelantos WHERE viaje_id = ? AND activo = 1 ORDER BY fecha ASC");
         $stmtA->execute([$id]);
         $adelantos = $stmtA->fetchAll();
 
@@ -59,7 +57,12 @@ if (isset($_GET['get_viaje_info'])) {
     }
 }
 
-// --- Selectores para “Editar Viaje / Comisiones” ---
+// --- Validación mínima para render ---
+if ($viaje_id <= 0) {
+    $error = 'No se recibió un viaje válido para liquidar.';
+}
+
+// --- Selectores para “Editar Viaje / Comisiones” (se mantienen) ---
 $lista_pagadores = $pdo->prepare("SELECT id, razon_social FROM clientes WHERE transportista_id = ? AND es_pagador = 1 ORDER BY razon_social ASC");
 $lista_pagadores->execute([$active_company_id]);
 
@@ -68,84 +71,89 @@ $lista_comisionistas->execute([$active_company_id]);
 
 ?>
 
-<div class="card" style="margin-bottom:20px; border-top:4px solid var(--accent); padding:12px 16px;">
-    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-        <div>
-            <h1 style="margin:0;">Liquidación de Flete (Viaje)</h1>
-            <p style="margin:6px 0 0; opacity:0.8;">Cargar datos operativos, rendición, facturación y cobro.</p>
-        </div>
-        <div style="display:flex; gap:10px; flex-wrap:wrap;">
-            <a class="btn-primary" href="?route=cobranzas" style="background:#34495e; padding:6px 14px; font-size:0.9rem; text-decoration:none; display:inline-flex; align-items:center; gap:8px;">
-                <i class="fas fa-arrow-left"></i> Volver a Cobranzas
-            </a>
-        </div>
+
+<div class="liq-header">
+    <div>
+        <h1>Liquidación de Flete (Viaje)</h1>
+        <p>Cargar datos operativos, rendición, facturación y cobro.</p>
+    </div>
+    <div class="liq-header-actions">
+        <a class="btn-primary" href="?route=cobranzas" style="background:#34495e; padding:6px 14px; font-size:0.9rem; text-decoration:none; display:inline-flex; align-items:center; gap:8px;">
+            <i class="fas fa-arrow-left"></i> Volver a Cobranzas
+        </a>
     </div>
 </div>
 
 <?php if ($mensaje): ?>
-    <div class="card" style="background:#d4edda; color:#155724; border:1px solid #c3e6cb; margin-bottom:20px;">
+    <div class="liq-alert liq-alert--success">
         <i class="fas fa-check-circle"></i> <?= htmlspecialchars($mensaje) ?>
     </div>
 <?php endif; ?>
 
 <?php if ($error): ?>
-    <div class="card" style="background:#f8d7da; color:#721c24; border:1px solid #f5c6cb; margin-bottom:20px;">
+    <div class="liq-alert liq-alert--error">
         <i class="fas fa-exclamation-triangle"></i> <?= htmlspecialchars($error) ?>
     </div>
 <?php endif; ?>
 
 <?php if ($viaje_id > 0 && !$error): ?>
-    <div class="card" style="margin-bottom: 30px; border-top: 4px solid var(--accent); padding: 12px; background: transparent;">
-        <div class="card" style="background:rgba(0,0,0,0.02); border-left:4px solid #34495e; margin-bottom:15px; padding:12px;">
-            <h3 style="margin:0 0 10px 0;"><i class="fas fa-info-circle"></i> Datos Operativos</h3>
-            <p id="liq_viaje_resumen_text" style="font-size:0.95rem; margin:0 0 10px 0;"></p>
-            <button onclick="prepararEditarViajeLiq()" class="btn-primary" style="width:100%; background:#34495e;">
-                <i class="fas fa-edit"></i> Editar Viaje / Comisiones
-            </button>
-        </div>
+    <div class="liq-main">
 
-        <div class="form-grid" style="margin-bottom:15px;">
-            <div class="card" style="background:rgba(0,0,0,0.02); border-left:4px solid #2ecc71; padding:12px;">
-                <h3 style="margin:0 0 10px 0;"><i class="fas fa-user"></i> Chofer</h3>
-                <p id="liq_chofer_info" style="margin:0;"></p>
-                <div id="btn_area_chofer" style="margin-top:10px;"></div>
+        <div class="liq-section liq-section--operativos">
+            <div class="liq-section-header">
+                <i class="fas fa-info-circle"></i> Datos Operativos
             </div>
-
-            <div class="card" style="background:rgba(0,0,0,0.02); border-left:4px solid #f39c12; padding:12px;">
-                <h3 style="margin:0 0 10px 0;"><i class="fas fa-handshake"></i> Comisión</h3>
-                <p id="liq_comision_info" style="margin:0;"></p>
-                <div id="btn_area_comision" style="margin-top:10px;"></div>
-            </div>
-        </div>
-
-        <div class="card" style="margin-bottom: 20px; padding:12px; background:rgba(0,0,0,0.02);">
-            <h3 style="margin:0 0 10px 0;"><i class="fas fa-wallet"></i> Rendición de Fondos (Chofer)</h3>
-            <div id="liq_detalles_fondos" style="font-size:0.95rem; margin-bottom:15px; padding:10px; background:rgba(0,0,0,0.02); border-radius:5px;"></div>
-
-            <div style="margin: 0 0 15px; padding:10px; border:1px dashed rgba(0,0,0,0.15); border-radius:6px; background:rgba(0,0,0,0.01);">
-                <div style="font-weight:bold; margin-bottom:6px;">Datos de Facturación (para el viaje)</div>
-                <div id="liq_factura_info_operativos" style="opacity:0.95; font-size:0.95rem;">—</div>
-            </div>
-
-            <div class="form-grid" style="margin-bottom:15px;">
-                <button onclick="prepararNuevoGastoLiq()" class="btn-primary" style="background:#e67e22;">
-                    <i class="fas fa-gas-pump"></i> Cargar Gasto
-                </button>
-                <button onclick="prepararNuevoAdelantoLiq()" class="btn-primary" style="background:#3498db;">
-                    <i class="fas fa-hand-holding-usd"></i> Dar Adelanto
+            <div class="liq-section-body">
+                <div id="liq_operativos_content" class="liq-info-text"></div>
+                <button onclick="prepararEditarViajeLiq()" class="btn-primary liq-action-btn" style="background:#34495e;">
+                    <i class="fas fa-edit"></i> Editar Viaje / Comisiones
                 </button>
             </div>
-            <div id="liq_gastos_table_container"></div>
-            <div id="liq_adelantos_table_container" style="margin-top:15px;"></div>
         </div>
 
-        <div class="form-grid">
-            <div class="card" style="background:rgba(0,0,0,0.02); border-left:4px solid #2ecc71; padding:12px;">
-                <h3 style="margin:0 0 10px 0;"><i class="fas fa-money-bill-wave"></i> Cobro</h3>
-                <p id="liq_cobro_info" style="margin:0;"></p>
-                <div id="btn_area_cobro" style="margin-top:10px;"></div>
+        <div class="liq-grid-2">
+            <div class="liq-section liq-section--chofer">
+                <div class="liq-section-header">
+                    <i class="fas fa-user"></i> Chofer
+                </div>
+                <div class="liq-section-body">
+                    <p id="liq_chofer_info" class="liq-info-text"></p>
+                    <div id="btn_area_chofer"></div>
+                </div>
+            </div>
+
+            <div class="liq-section liq-section--comision">
+                <div class="liq-section-header">
+                    <i class="fas fa-handshake"></i> Comisión
+                </div>
+                <div class="liq-section-body">
+                    <p id="liq_comision_info" class="liq-info-text"></p>
+                    <div id="btn_area_comision"></div>
+                </div>
             </div>
         </div>
+
+        <div class="liq-section liq-section--fondos">
+            <div class="liq-section-header">
+                <i class="fas fa-wallet"></i> Rendición de Fondos (Chofer)
+            </div>
+            <div class="liq-section-body">
+                <div id="liq_detalles_fondos" class="liq-fondos-resumen"></div>
+
+                <div class="liq-actions-row">
+                    <button onclick="prepararNuevoGastoLiq()" class="btn-primary" style="background:#e67e22; justify-content:center;">
+                        <i class="fas fa-gas-pump"></i> Cargar Gasto
+                    </button>
+                    <button onclick="prepararNuevoAdelantoLiq()" class="btn-primary" style="background:#3498db; justify-content:center;">
+                        <i class="fas fa-hand-holding-usd"></i> Dar Adelanto
+                    </button>
+                </div>
+
+                <div class="liq-table-wrapper" id="liq_gastos_table_container"></div>
+                <div class="liq-table-wrapper" id="liq_adelantos_table_container"></div>
+            </div>
+        </div>
+
     </div>
 
     <!-- Formulario oculto para acciones directas (delegamos a route=cobranzas que ya tiene los endpoints POST) -->
@@ -373,67 +381,51 @@ $lista_comisionistas->execute([$active_company_id]);
                     <span style="color:${residual > 0 ? '#e67e22' : '#2ecc71'}">Efectivo en mano: <strong>${formatMoneyJS(residual)}</strong></span>
                 `;
 
-                document.getElementById('liq_viaje_resumen_text').innerHTML = `Viaje #${v.id} (CP: ${v.carta_porte_nro || 'S/D'})<br>Producto: <strong>${v.producto}</strong> | Tarifa: <strong>${formatMoneyJS(v.tarifa_tonelada)}</strong>`;
+                // ---- Datos Operativos (unificado) ----
+                const docs = [
+                    v.ctg_nro ? `CTG: ${v.ctg_nro}` : '',
+                    v.carta_porte_nro ? `CP: ${v.carta_porte_nro}` : '',
+                    v.otros_docs ? `Remito: ${v.otros_docs}` : ''
+                ].filter(Boolean).join(' | ');
+                
+                let cobroStatusText = v.estado === 'cobrado' || v.estado === 'liquidado'
+                    ? 'COBRADO'
+                    : v.estado === 'facturado'
+                        ? 'PENDIENTE COBRO'
+                        : 'PENDIENTE FACTURA';
+
+                const operativosHtml = `
+                    <div class="liq-data-line">Viaje: <strong>${docs || 'S/D'}</strong></div>
+                    <div class="liq-data-line">Producto: <strong>${v.producto || '-'}</strong> | Tarifa: <strong>${formatMoneyJS(v.tarifa_tonelada)}</strong></div>
+                    <div class="liq-data-line">Cliente: <strong>${v.cliente_razon_social || '-'}</strong></div>
+                    <div class="liq-data-line">Flete Neto: <strong>${formatMoneyJS(v.total_flete_neto)}</strong> | Estado: <strong>${v.estado ? v.estado.toUpperCase() : '-'}</strong></div>
+                    <div class="liq-data-line" style="margin-top:10px;">Cobro: <strong>${v.fecha_cobro ? formatDateJS(v.fecha_cobro) : cobroStatusText}</strong></div>
+                `;
+                const operativosContent = document.getElementById('liq_operativos_content');
+                if (operativosContent) operativosContent.innerHTML = operativosHtml;
                 document.getElementById('liq_chofer_info').innerHTML = `Chofer: <strong>${v.chofer_nombre}</strong><br>Porcentaje: <strong>${v.chofer_porcentaje}%</strong>`;
 
                 document.getElementById('btn_area_chofer').innerHTML = v.acreditado_chofer == 0
-                    ? `<button onclick="ejecutarAccionLiq('acreditar_chofer', ${id})" class="btn-primary" style="width:100%; margin-top:10px;"><i class="fas fa-check"></i> Acreditar Chofer</button>`
-                    : `<span class="badge badge-success" style="display:block; padding:8px; margin-top:10px;">ACREDITADO</span>`;
+                    ? `<button onclick="ejecutarAccionLiq('acreditar_chofer', ${id})" class="btn-primary liq-action-btn" style="margin-top:10px;"><i class="fas fa-check"></i> Acreditar Chofer</button>`
+                    : `<span class="liq-status-badge liq-status-badge--success">ACREDITADO</span>`;
 
                 if (v.comisionista_id) {
                     const mC = (v.comision_tipo === 'porcentaje') ? (v.total_flete_neto * v.comision_valor / 100) : v.comision_valor;
                     document.getElementById('liq_comision_info').innerHTML = `Intermediario: <strong>${v.comisionista_nombre}</strong><br>Monto: <strong>${formatMoneyJS(mC)}</strong>`;
                     document.getElementById('btn_area_comision').innerHTML = v.comision_pagada == 0
-                        ? `<button onclick="ejecutarAccionLiq('pagar_comision', ${id})" class="btn-primary" style="width:100%; margin-top:10px; background:#f39c12;"><i class="fas fa-hand-holding-usd"></i> Pagar</button>`
-                        : `<span class="badge badge-success" style="display:block; padding:8px; margin-top:10px;">PAGADA</span>`;
+                        ? `<button onclick="ejecutarAccionLiq('pagar_comision', ${id})" class="btn-primary liq-action-btn" style="margin-top:10px; background:#f39c12;"><i class="fas fa-hand-holding-usd"></i> Pagar</button>`
+                        : `<span class="liq-status-badge liq-status-badge--success">PAGADA</span>`;
                 } else {
                     document.getElementById('liq_comision_info').innerText = 'Sin comisión.';
                     document.getElementById('btn_area_comision').innerHTML = '';
                 }
 
-        // Datos de facturación visibles en la card principal (operativos)
-                const facturaOperativos = document.getElementById('liq_factura_info_operativos');
-                if (facturaOperativos) {
-                    const fleteNeto = (v.total_flete_neto ?? 0);
-                    const fleteBruto = (v.total_flete_bruto ?? null);
-                    const tarifaTon = (v.tarifa_tonelada ?? null);
-
-                    facturaOperativos.innerHTML = `
-                        Cliente: <strong>${v.cliente_razon_social || '-'}</strong><br>
-                        Tarifa (x ton): <strong>${tarifaTon !== null ? formatMoneyJS(tarifaTon) : '-'}</strong><br>
-                        Flete Neto: <strong>${formatMoneyJS(fleteNeto)}</strong><br>
-                        ${fleteBruto !== null ? `Flete Bruto/Importe total: <strong>${formatMoneyJS(fleteBruto)}</strong><br>` : ''}
-                        CP: <strong>${v.carta_porte_nro || 'S/D'}</strong><br>
-                        Estado: <strong>${v.estado ? v.estado.toUpperCase() : '-'}</strong><br>
-                        Fecha cobro: <strong>${v.fecha_cobro ? formatDateJS(v.fecha_cobro) : '-'}</strong>
-                    `;
-                }
-
-
-                // Botón de facturación (si ya existe btn_area_factura en otro contenedor)
-                // En esta pantalla ya no mostramos la card aparte de Facturación.
-                // Se mantiene el modal, pero el botón lo dejamos fuera por ahora.
+                // Botón de facturación (si existe btn_area_factura en otro contenedor)
                 if (document.getElementById('btn_area_factura')) {
                     document.getElementById('btn_area_factura').innerHTML = v.factura_nro 
                         ? `<span class="badge badge-success" style="display:block; padding:8px; margin-top:10px;">FACTURA: ${v.factura_nro}</span>`
                         : `<button onclick="abrirModalFactura(${id}, '${v.cliente_razon_social.replace(/'/g, "\\'")}', ${v.total_flete_neto}, '${v.carta_porte_nro || 'S/D'}')" class="btn-primary" style="width:100%; margin-top:10px; background:#3498db;"><i class="fas fa-file-invoice"></i> Generar Factura</button>`;
                 }
-
-                // Resumen de facturación (en card Datos Operativos)
-                const previewBox = document.getElementById('liq_factura_preview');
-                const previewText = document.getElementById('liq_factura_preview_text');
-                if (previewBox && previewText) {
-                    const facturaPreviewText = v.factura_nro
-                        ? `Cliente: ${v.cliente_razon_social}<br>Flete Neto: ${formatMoneyJS(v.total_flete_neto)}`
-                        : `Sin factura generada.`;
-                    previewText.innerHTML = facturaPreviewText;
-                    previewBox.style.display = v.factura_nro ? 'block' : 'none';
-                }
-
-                document.getElementById('liq_cobro_info').innerHTML = `Estado: <strong>${v.estado.toUpperCase()}</strong><br>Fecha: <strong>${formatDateJS(v.fecha_cobro)}</strong>`;
-                document.getElementById('btn_area_cobro').innerHTML = v.estado === 'facturado'
-                    ? `<button onclick="registrarCobroManual(${id}, '${String(v.factura_nro || '')}')" class="btn-primary" style="width:100%; margin-top:10px; background:#2ecc71;"><i class="fas fa-money-bill-wave"></i> Cobrar</button>`
-                    : (v.estado === 'cobrado' || v.estado === 'liquidado' ? `<span class="badge badge-success" style="display:block; padding:8px; margin-top:10px;">COBRADO</span>` : `<span class="badge badge-secondary" style="display:block; padding:8px; margin-top:10px;">PENDIENTE FACTURA</span>`);
 
                 // Tablas
                 renderGastosTable(data.gastos);
@@ -448,13 +440,13 @@ $lista_comisionistas->execute([$active_company_id]);
     function renderGastosTable(gastos) {
         let h = "<h4>Gastos</h4>";
         if (!gastos.length) {
-            h += "<p style='opacity:0.7'>Sin gastos.</p>";
+            h += "<p class='liq-table-empty'>Sin gastos.</p>";
         } else {
             h += "<table class='data-table'><thead><tr><th>Fecha</th><th>Tipo</th><th>Monto</th><th></th></tr></thead><tbody>";
             gastos.forEach(g => {
                 h += `<tr><td>${formatDateJS(g.fecha)}</td><td>${g.tipo_gasto.toUpperCase()}</td><td>${formatMoneyJS(g.monto)}</td><td>
-                    <button onclick='editGastoLiq(${JSON.stringify(g).replace(/'/g, "\\'")})' style='background:none;border:none;color:var(--accent);cursor:pointer'><i class='fas fa-edit'></i></button>
-                    <button onclick='deleteGastoLiq(${g.id})' style='background:none;border:none;color:#e74c3c;cursor:pointer'><i class='fas fa-trash-alt'></i></button>
+                    <button onclick='editGastoLiq(${JSON.stringify(g).replace(/'/g, "\\'")})' class='liq-icon-btn liq-icon-btn--edit'><i class='fas fa-edit'></i></button>
+                    <button onclick='deleteGastoLiq(${g.id})' class='liq-icon-btn liq-icon-btn--delete'><i class='fas fa-trash-alt'></i></button>
                 </td></tr>`;
             });
             h += "</tbody></table>";
@@ -465,13 +457,13 @@ $lista_comisionistas->execute([$active_company_id]);
     function renderAdelantosTable(adelantos) {
         let h = "<h4>Adelantos</h4>";
         if (!adelantos.length) {
-            h += "<p style='opacity:0.7'>Sin adelantos.</p>";
+            h += "<p class='liq-table-empty'>Sin adelantos.</p>";
         } else {
             h += "<table class='data-table'><thead><tr><th>Fecha</th><th>Método</th><th>Monto</th><th></th></tr></thead><tbody>";
             adelantos.forEach(a => {
                 h += `<tr><td>${formatDateJS(a.fecha)}</td><td>${a.metodo_pago}</td><td>${formatMoneyJS(a.monto)}</td><td>
-                    <button onclick='editAdelantoLiq(${JSON.stringify(a).replace(/'/g, "\\'")})' style='background:none;border:none;color:var(--accent);cursor:pointer'><i class='fas fa-edit'></i></button>
-                    <button onclick='deleteAdelantoLiq(${a.id})' style='background:none;border:none;color:#e74c3c;cursor:pointer'><i class='fas fa-trash-alt'></i></button>
+                    <button onclick='editAdelantoLiq(${JSON.stringify(a).replace(/'/g, "\\'")})' class='liq-icon-btn liq-icon-btn--edit'><i class='fas fa-edit'></i></button>
+                    <button onclick='deleteAdelantoLiq(${a.id})' class='liq-icon-btn liq-icon-btn--delete'><i class='fas fa-trash-alt'></i></button>
                 </td></tr>`;
             });
             h += "</tbody></table>";

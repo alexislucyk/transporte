@@ -17,7 +17,7 @@ $stmt->execute([$active_company_id]);
 $pagos_choferes = $stmt->fetchColumn() ?: 0;
 
 // 3. Egresos Reales: Gastos de Empresa pagados directamente
-$stmt = $pdo->prepare("SELECT SUM(g.monto) FROM viajes_gastos g JOIN viajes v ON g.viaje_id = v.id WHERE v.transportista_id = ? AND g.pagado_por = 'empresa'");
+$stmt = $pdo->prepare("SELECT SUM(g.monto) FROM viajes_gastos g JOIN viajes v ON g.viaje_id = v.id WHERE v.transportista_id = ? AND g.pagado_por = 'empresa' AND g.activo = 1");
 $stmt->execute([$active_company_id]);
 $gastos_empresa = $stmt->fetchColumn() ?: 0;
 
@@ -56,9 +56,9 @@ foreach($ids_choferes as $ch_id) {
         - 
         COALESCE((SELECT SUM(monto) FROM chofer_pagos WHERE chofer_id = ? AND tipo != 'liquidacion'), 0) 
         + 
-        COALESCE((SELECT SUM(vg.monto) FROM viajes_gastos vg JOIN viajes v ON vg.viaje_id = v.id WHERE v.chofer_id = ? AND vg.pagado_por = 'adelanto'), 0)
+        COALESCE((SELECT SUM(vg.monto) FROM viajes_gastos vg JOIN viajes v ON vg.viaje_id = v.id WHERE v.chofer_id = ? AND vg.pagado_por = 'adelanto' AND vg.activo = 1), 0)
         -
-        COALESCE((SELECT SUM(va.monto) FROM viajes_adelantos va JOIN viajes v ON va.viaje_id = v.id WHERE v.chofer_id = ?), 0)
+        COALESCE((SELECT SUM(va.monto) FROM viajes_adelantos va JOIN viajes v ON va.viaje_id = v.id WHERE v.chofer_id = ? AND va.activo = 1), 0)
     )";
     $st_s = $pdo->prepare($sql_s);
     $st_s->execute([$ch_id, $ch_id, $ch_id, $ch_id]);
@@ -113,7 +113,7 @@ foreach($ids_choferes as $ch_id) {
                 <thead><tr><th>Fecha</th><th>Concepto</th><th style="text-align:right">Monto</th></tr></thead>
                 <tbody>
                     <?php
-                    $sql_out = "(SELECT cp.fecha, CONCAT('Chofer: ', c.apellido) as concepto, cp.monto FROM chofer_pagos cp JOIN choferes c ON cp.chofer_id = c.id WHERE c.transportista_id = ? AND cp.tipo != 'liquidacion') UNION (SELECT g.fecha, CONCAT('Gasto: ', g.tipo_gasto) as concepto, g.monto FROM viajes_gastos g JOIN viajes v ON g.viaje_id = v.id WHERE v.transportista_id = ? AND g.pagado_por = 'empresa') UNION (SELECT m.fecha, CONCAT('Manto: ', v.dominio) as concepto, m.costo_total as monto FROM mantenimientos m JOIN vehiculos v ON m.vehiculo_id = v.id WHERE v.transportista_id = ?) ORDER BY fecha DESC LIMIT 8";
+                    $sql_out = "(SELECT cp.fecha, CONCAT('Chofer: ', c.apellido) as concepto, cp.monto FROM chofer_pagos cp JOIN choferes c ON cp.chofer_id = c.id WHERE c.transportista_id = ? AND cp.tipo != 'liquidacion') UNION (SELECT g.fecha, CONCAT('Gasto: ', g.tipo_gasto) as concepto, g.monto FROM viajes_gastos g JOIN viajes v ON g.viaje_id = v.id WHERE v.transportista_id = ? AND g.pagado_por = 'empresa' AND g.activo = 1) UNION (SELECT m.fecha, CONCAT('Manto: ', v.dominio) as concepto, m.costo_total as monto FROM mantenimientos m JOIN vehiculos v ON m.vehiculo_id = v.id WHERE v.transportista_id = ?) ORDER BY fecha DESC LIMIT 8";
                     $stmt = $pdo->prepare($sql_out);
                     $stmt->execute([$active_company_id, $active_company_id, $active_company_id]);
                     foreach($stmt->fetchAll() as $o): ?>

@@ -121,6 +121,7 @@ CREATE TABLE viajes (
     
     estado ENUM('en_viaje', 'descargado', 'facturado', 'cobrado', 'liquidado') DEFAULT 'en_viaje',
     observaciones TEXT,
+    activo BOOLEAN DEFAULT TRUE,
     
     FOREIGN KEY (transportista_id) REFERENCES transportistas(id) ON DELETE CASCADE,
     FOREIGN KEY (cliente_id) REFERENCES clientes(id),
@@ -140,6 +141,7 @@ CREATE TABLE viajes_gastos (
     descripcion VARCHAR(255),
     pagado_por ENUM('empresa', 'adelanto', 'descuento_flete') DEFAULT 'empresa',
     fecha DATE NOT NULL,
+    activo BOOLEAN DEFAULT TRUE,
     FOREIGN KEY (viaje_id) REFERENCES viajes(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
@@ -149,6 +151,7 @@ CREATE TABLE viajes_adelantos (
     monto DECIMAL(15,2) NOT NULL,
     fecha DATE NOT NULL,
     metodo_pago VARCHAR(50), -- Efectivo, Transferencia
+    activo BOOLEAN DEFAULT TRUE,
     FOREIGN KEY (viaje_id) REFERENCES viajes(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
@@ -248,4 +251,3 @@ CREATE TABLE IF NOT EXISTS facturas_fletes_detalle (
 
     FOREIGN KEY (factura_id) REFERENCES facturas_fletes(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
-
