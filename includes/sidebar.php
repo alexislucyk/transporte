@@ -20,7 +20,11 @@
         <form id="companyForm" method="POST" action="">
             <select name="set_active_company" class="company-select" onchange="this.form.submit()">
                 <?php foreach($todas_empresas as $emp): ?>
-                    <option value="<?= $emp['id'] ?>" <?= $active_company_id == $emp['id'] ? 'selected' : '' ?> >
+                    <?php
+                        $isActivo = isset($emp['activo']) ? (int)$emp['activo'] : 1;
+                        $style = ($user_role === 'developer' && $isActivo === 0) ? 'color:#e74c3c; font-weight:600;' : '';
+                    ?>
+                    <option value="<?= $emp['id'] ?>" <?= $active_company_id == $emp['id'] ? 'selected' : '' ?> <?= $style ? 'style="'.$style.'"' : '' ?> >
                         <?= htmlspecialchars($emp['razon_social']) ?>
                     </option>
                 <?php endforeach; ?>
@@ -52,7 +56,7 @@
 
     <nav class="nav-menu-bottom">
         <?php
-        navItem('transportistas', 'fa-industry', 'Empresas', $module, $user_role, $user_permissions);
+        navItem('empresas', 'fa-industry', 'Empresas', $module, $user_role, $user_permissions);
         navItem('configuracion', 'fa-cog', 'Configuración', $module, $user_role, $user_permissions);
         ?>
         <a href="logout.php" class="nav-item" style="color: #e74c3c;">

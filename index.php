@@ -54,8 +54,8 @@ $params = array_slice($routeParts, 2); // Captura IDs o extras
 // - Si el usuario logueado es 'user': se asume que su created_by (en users) indica el admin dueño.
 //   Para esto usamos $_SESSION['admin_root_id'] si existe, si no, fallback a $_SESSION['user_id'].
 if ($user_role === 'developer') {
-    // El desarrollador tiene visibilidad total de todas las empresas del sistema
-    $stmt_trans = $pdo->query("SELECT id, razon_social FROM transportistas ORDER BY razon_social ASC");
+    // El desarrollador puede ver también las empresas inactivas (borrado lógico)
+    $stmt_trans = $pdo->query("SELECT id, razon_social, activo FROM transportistas ORDER BY razon_social ASC");
 } else {
 $adminRootId = $_SESSION['admin_root_id'] ?? null;
 
@@ -75,9 +75,15 @@ $adminRootId = $_SESSION['admin_root_id'] ?? null;
     $stmt_trans = $pdo->prepare("SELECT id, razon_social FROM transportistas WHERE created_by = ? ORDER BY razon_social ASC");
     $stmt_trans->execute([$adminRootId]);
 }
-$todas_empresas = $stmt_trans->fetchAll();
+    $todas_empresas = $stmt_trans->fetchAll();
+    // Para developer: marcamos estilo en selector (activos normales, inactivos en rojo)
+
 
 // 2. Manejar cambio de empresa
+
+// Alias: si la empresa activa se usaba antes con transportistas, mantenemos compatibilidad
+// (no afecta lógica actual, pero evita futuros cambios de referencia)
+
 if (isset($_POST['set_active_company'])) {
     $requested_id = $_POST['set_active_company'];
     // Seguridad: Validar que la empresa seleccionada esté en la lista de permitidas para este usuario
@@ -129,7 +135,7 @@ $titles = [
     'clientes'  => 'Cartera de Clientes',
     'comisionistas' => 'Gestión de Comisionistas',
     'cobranzas' => 'Gestión de Cobranzas',
-    'transportistas' => 'Gestión de Empresas',
+    'empresas' => 'Gestión de Empresas',
     'mantenimiento' => 'Mantenimiento de Flota',
     'configuracion' => 'Configuración del Sistema',
     'tesoreria' => 'Tesorería y Conciliación'
@@ -202,8 +208,8 @@ if (!in_array($user_role, ['admin', 'developer']) && $module !== 'dashboard') {
             case 'vehiculos':
                 include_once 'modules/vehiculos.php';
                 break;
-            case 'transportistas':
-                include_once 'modules/transportistas.php';
+            case 'empresas':
+                include_once 'modules/empresas.php';
                 break;
             case 'clientes':
                 include_once 'modules/clientes.php';
@@ -223,9 +229,9 @@ if (!in_array($user_role, ['admin', 'developer']) && $module !== 'dashboard') {
             case 'cobranzas_fletes_liquidar':
                 include_once 'modules/cobranzas_fletes_liquidar.php';
                 break;
-
-
-
+            case 'cobranzas_fletes_factura':
+                include_once 'modules/cobranzas_fletes_factura.php';
+                break;
             case 'mantenimiento':
                 include_once 'modules/mantenimiento.php';
                 break;
