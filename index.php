@@ -91,7 +91,7 @@ if (isset($_POST['set_active_company'])) {
     foreach ($todas_empresas as $emp) {
         if ($emp['id'] == $requested_id) { $is_allowed = true; break; }
     }
-    
+
     if ($is_allowed) {
         $_SESSION['active_company_id'] = $requested_id;
     }
@@ -99,9 +99,9 @@ if (isset($_POST['set_active_company'])) {
     exit;
 }
 
-// Redirigir si no hay empresas creadas (excepto si ya estamos en transportistas)
-if (empty($todas_empresas) && !in_array($module, ['transportistas', 'dashboard', 'configuracion'])) {
-    header("Location: " . $base_path . "transportistas");
+// Redirigir si no hay empresas creadas (excepto si ya estamos en empresas o dashboard/config)
+if (empty($todas_empresas) && !in_array($module, ['empresas', 'dashboard', 'configuracion'])) {
+    header("Location: " . $base_path . "empresas");
     exit;
 }
 
@@ -182,7 +182,7 @@ if (!in_array($user_role, ['admin', 'developer']) && $module !== 'dashboard') {
 <?php include_once 'includes/sidebar.php'; ?>
 
     <main class="main-content">
-        <?php 
+        <?php
         if ($access_denied) : ?>
             <div class="card" style="text-align:center; padding: 60px 20px; border-top: 5px solid #e74c3c; max-width: 600px; margin: 40px auto;">
                 <i class="fas fa-user-shield fa-5x" style="color:#e74c3c; margin-bottom:25px;"></i>

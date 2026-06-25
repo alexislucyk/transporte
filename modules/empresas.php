@@ -1,13 +1,25 @@
 <?php
 /**
  * Módulo de Gestión de Empresas (Transportistas) - Trans Cargo Hub
+ * Módulo canónico (consolida lo que antes hacía transportistas.php).
  */
 
 $mensaje = "";
 $error = "";
 
+// --- HELPERS DE AUTORIZACIÓN (multi-tenant seguro) ---
+function empresaOwner(PDO $pdo, int $id, int $currentUserId, string $currentRole): bool {
+    if ($currentRole === 'developer') return true;
+    $stmt = $pdo->prepare("SELECT id FROM transportistas WHERE id = ? AND created_by = ?");
+    $stmt->execute([$id, $currentUserId]);
+    return (bool)$stmt->fetchColumn();
+}
+
 // --- PROCESAR ACCIONES (POST) ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    $currentRole = $_SESSION['user_role'] ?? 'user';
+    $currentUserId = (int)$_SESSION['user_id'];
+
     // Solo para acciones nuevo/editar (en borrar no vienen estos campos)
     $razon_social = trim($_POST['razon_social'] ?? '');
     $cuit = trim($_POST['cuit'] ?? '');
@@ -19,7 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         try {
             $sql = "INSERT INTO transportistas (razon_social, cuit, direccion, telefono, email, created_by) VALUES (?, ?, ?, ?, ?, ?)";
             $stmt = $pdo->prepare($sql);
-            $stmt->execute([$razon_social, $cuit, $direccion, $telefono, $email, $_SESSION['user_id']]);
+            $stmt->execute([$razon_social, $cuit, $direccion, $telefono, $email, $currentUserId]);
             $mensaje = "Empresa registrada exitosamente.";
         } catch (PDOException $e) {
             $error = ($e->getCode() == 23000) ? "Error: El CUIT ya existe." : "Error: " . $e->getMessage();
@@ -27,24 +39,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 
     if ($_POST['action'] === 'borrar') {
-        $id = $_POST['id'];
-        try {
-            $sql = "UPDATE transportistas SET activo = 0 WHERE id=?";
-            $pdo->prepare($sql)->execute([$id]);
-            $mensaje = "Empresa eliminada (borrado lógico) correctamente.";
-        } catch (PDOException $e) {
-            $error = "Error al eliminar: " . $e->getMessage();
+        $id = (int)($_POST['id'] ?? 0);
+        if ($id <= 0 || !empresaOwner($pdo, $id, $currentUserId, $currentRole)) {
+            $error = "No autorizado: la empresa no existe o pertenece a otro administrador.";
+        } else {
+            try {
+                $sql = "UPDATE transportistas SET activo = 0 WHERE id=?";
+                $pdo->prepare($sql)->execute([$id]);
+                $mensaje = "Empresa eliminada (borrado lógico) correctamente.";
+            } catch (PDOException $e) {
+                $error = "Error al eliminar: " . $e->getMessage();
+            }
         }
     }
 
     if ($_POST['action'] === 'editar') {
-        $id = $_POST['id'];
-        try {
-            $sql = "UPDATE transportistas SET razon_social=?, cuit=?, direccion=?, telefono=?, email=? WHERE id=?";
-            $pdo->prepare($sql)->execute([$razon_social, $cuit, $direccion, $telefono, $email, $id]);
-            $mensaje = "Empresa actualizada correctamente.";
-        } catch (PDOException $e) {
-            $error = "Error al actualizar: " . $e->getMessage();
+        $id = (int)($_POST['id'] ?? 0);
+        if ($id <= 0 || !empresaOwner($pdo, $id, $currentUserId, $currentRole)) {
+            $error = "No autorizado: la empresa no existe o pertenece a otro administrador.";
+        } else {
+            try {
+                $sql = "UPDATE transportistas SET razon_social=?, cuit=?, direccion=?, telefono=?, email=? WHERE id=?";
+                $pdo->prepare($sql)->execute([$razon_social, $cuit, $direccion, $telefono, $email, $id]);
+                $mensaje = "Empresa actualizada correctamente.";
+            } catch (PDOException $e) {
+                $error = "Error al actualizar: " . $e->getMessage();
+            }
         }
     }
 }
@@ -123,7 +143,7 @@ if ($_SESSION['user_role'] === 'developer') {
             <div class="modal-body">
                 <input type="hidden" name="action" id="emp-action" value="nuevo">
                 <input type="hidden" name="id" id="emp-id">
-                
+
                 <div class="form-group">
                     <label>Razón Social</label>
                     <input type="text" name="razon_social" id="emp-razon" class="input-field" required>
@@ -175,57 +195,7 @@ function editEmpresa(data) {
 }
 
 function confirmarBorrarEmpresa(id) {
-    // Modal simple acorde al sistema (mismo estilo que otros modales)
-    const modal = document.createElement('div');
-    modal.style.position = 'fixed';
-    modal.style.inset = '0';
-    modal.style.background = 'rgba(0,0,0,0.4)';
-    modal.style.display = 'flex';
-    modal.style.alignItems = 'center';
-    modal.style.justifyContent = 'center';
-    modal.style.zIndex = '9999';
-
-    const box = document.createElement('div');
-    box.style.background = '#fff';
-    box.style.borderRadius = '10px';
-    box.style.width = '100%';
-    box.style.maxWidth = '520px';
-    box.style.boxShadow = '0 10px 30px rgba(0,0,0,0.2)';
-
-    box.innerHTML = `
-        <div style="padding: 16px 20px; border-bottom: 1px solid #eee; display:flex; align-items:center; justify-content:space-between;">
-            <div style="display:flex; align-items:center; gap:10px;">
-                <i class="fas fa-exclamation-triangle" style="color:#e74c3c;"></i>
-                <h3 style="margin:0; font-size:16px;">Confirmar borrado lógico</h3>
-            </div>
-            <button type="button" style="background:none; border:none; font-size:22px; line-height:1; cursor:pointer; color:#666;" aria-label="Cerrar">&times;</button>
-        </div>
-        <div style="padding: 18px 20px; color:#333;">
-            ¿Seguro que deseas borrar esta empresa? 
-            
-        </div>
-        <div style="padding: 14px 20px; display:flex; justify-content:flex-end; gap:12px; border-top:1px solid #eee;">
-            <button type="button" style="padding:10px 14px; border-radius:8px; border:1px solid #ddd; background:#f7f7f7; cursor:pointer;">Cancelar</button>
-            <button type="button" id="btn-confirmar-borrar" style="padding:10px 14px; border-radius:8px; border:1px solid #e74c3c; background:#e74c3c; color:#fff; cursor:pointer;">Borrar</button>
-        </div>
-    `;
-
-    modal.appendChild(box);
-    document.body.appendChild(modal);
-
-    const cerrarBtn = box.querySelector('button[aria-label="Cerrar"]');
-    const cancelarBtn = box.querySelector('button[type="button"]:not(#btn-confirmar-borrar):not([aria-label="Cerrar"])');
-    const confirmarBtn = box.querySelector('#btn-confirmar-borrar');
-
-    function cerrar() {
-        modal.remove();
-    }
-
-    cerrarBtn.addEventListener('click', cerrar);
-    cancelarBtn.addEventListener('click', cerrar);
-
-    confirmarBtn.addEventListener('click', () => {
-        cerrar();
+    appConfirm("¿Seguro que deseas borrar esta empresa? (borrado lógico)", function() {
         const form = document.createElement('form');
         form.method = 'POST';
         form.style.display = 'none';
@@ -244,11 +214,6 @@ function confirmarBorrarEmpresa(id) {
         form.appendChild(empId);
         document.body.appendChild(form);
         form.submit();
-    });
-
-    // Cerrar al hacer click fuera del box
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) cerrar();
-    });
+    }, "Confirmar borrado lógico");
 }
 </script>

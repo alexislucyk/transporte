@@ -15,7 +15,7 @@ if (!defined('DB_USER')) {
 }
 if (!defined('DB_PASS')) {
     // Password real de tu DB (según database_schema/db anterior del proyecto)
-    define('DB_PASS', 'isidoro9');
+    define('DB_PASS', '');
 }
 
 try {
@@ -29,6 +29,9 @@ try {
         ]
     );
 } catch (PDOException $e) {
-    die("Error de conexión: " . $e->getMessage());
+    // Log interno con detalles (nunca expuesto al cliente)
+    error_log("[DB CONNECTION ERROR] " . $e->getMessage() . " | DB: " . DB_NAME . " | User: " . DB_USER);
+    // Mensaje genérico al usuario
+    die("Error: No se pudo conectar a la base de datos. Contacte al administrador del sistema.");
 }
 

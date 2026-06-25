@@ -9,13 +9,13 @@ $error = "";
 // Procesar el guardado si viene por POST
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['tema'])) {
     $nuevoTema = $_POST['tema'];
-    
+
     // Validar que el tema exista
     if (array_key_exists($nuevoTema, $themes)) {
         try {
             $stmt = $pdo->prepare("UPDATE configuraciones SET valor = ? WHERE clave = 'tema'");
             $stmt->execute([$nuevoTema]);
-            
+
             // Redireccionar para aplicar cambios
             header("Location: " . $base_path . "configuracion?success=1");
             exit;
@@ -40,7 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         // Acción: crear usuario
         if ($action === 'nuevo_usuario') {
             $targetRole = $_POST['role'] ?? 'user';
-            
+
             if ($targetRole === 'admin' && !$isDeveloper) {
                 throw new Exception("Solo el desarrollador (developer) puede crear usuarios con rol admin.");
             }
@@ -60,7 +60,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             // Si un admin crea un usuario 'user', ese usuario debe heredar su admin raíz.
             // Esto se usa en index.php para filtrar empresas y evitar ver empresas de otros admins.
             // Para el login actual no hace falta persistir; se resuelve en login.
-            
+
             $mensaje = "Usuario creado correctamente.";
         }
 
@@ -113,7 +113,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 }
             }
             $pdo->commit();
-            
+
             // Si se edita a sí mismo, actualizar sesión inmediatamente
             if ($targetUserId === (int)$_SESSION['user_id']) {
                 $_SESSION['user_permissions'] = $_POST['modules'] ?? [];
@@ -145,7 +145,7 @@ if (isset($_GET['success'])) $mensaje = $_GET['msg'] ?? "Configuración actualiz
     .theme-radio:checked + .theme-card { border-color: var(--accent); box-shadow: 0 0 10px rgba(0,0,0,0.1); background-color: rgba(0,0,0,0.02); }
     .theme-preview { display: flex; height: 40px; border-radius: 4px; overflow: hidden; margin-bottom: 10px; border: 1px solid #eee; }
     .theme-active-badge { color: var(--accent); font-size: 0.8rem; display: block; margin-top: 5px; }
-    
+
     .tab-menu { display: flex; border-bottom: 2px solid rgba(0,0,0,0.1); margin-bottom: 25px; gap: 10px; }
     .tab-link { padding: 12px 25px; cursor: pointer; border: none; background: none; font-weight: bold; color: #7f8c8d; border-bottom: 3px solid transparent; transition: 0.3s; font-size: 1rem; }
     .tab-link:hover { color: var(--accent); }
@@ -176,10 +176,10 @@ if (isset($_GET['success'])) $mensaje = $_GET['msg'] ?? "Configuración actualiz
 <div class="card">
     <h3>Apariencia</h3>
     <p>Selecciona el tema visual que prefieras para la interfaz:</p>
-    
+
     <form method="POST" action="configuracion">
         <div class="theme-grid">
-            
+
             <?php foreach($themes as $name => $colors): ?>
             <label style="cursor: pointer;">
                 <input type="radio" name="tema" value="<?= $name ?>" <?= $currentTheme == $name ? 'checked' : '' ?> class="theme-radio" style="display:none">
@@ -218,7 +218,7 @@ if (isset($_GET['success'])) $mensaje = $_GET['msg'] ?? "Configuración actualiz
             <i class="fas fa-user-plus"></i> Nuevo Usuario
         </button>
     </div>
-    
+
     <div class="table-container">
         <table class="data-table">
             <thead>
@@ -326,13 +326,13 @@ if (isset($_GET['success'])) $mensaje = $_GET['msg'] ?? "Configuración actualiz
             <div class="modal-body">
                 <p>Módulos permitidos para: <strong id="perm-display-name"></strong></p>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                    <?php 
+                    <?php
                     $modulos_lista = [
                         'viajes' => 'Viajes', 'choferes' => 'Choferes', 'cobranzas' => 'Cobranzas',
                         'comisionistas' => 'Comisionistas', 'vehiculos' => 'Vehículos',
                         'clientes' => 'Clientes', 'mantenimiento' => 'Mantenimiento',
-                        'tesoreria' => 'Tesorería', 'transportistas' => 'Empresas',
-                        'configuracion' => 'Configuración'
+                        'tesoreria' => 'Tesorería', 'empresas' => 'Empresas',
+                        'configuracion' => 'Configuración', 'choferes_ctacte' => 'Cta Cte Choferes'
                     ];
                     foreach ($modulos_lista as $key => $label): ?>
                         <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
