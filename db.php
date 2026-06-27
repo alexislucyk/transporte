@@ -2,9 +2,7 @@
 define('DB_HOST', getenv('DB_HOST') ?: 'db');
 define('DB_NAME', getenv('DB_NAME') ?: 'trans_dev_db');
 define('DB_USER', getenv('DB_USER') ?: 'root');
-define('DB_PASS', getenv('DB_PASS') ?: (isset($_ENV['DB_PASS']) ? (string)$_ENV['DB_PASS'] : ''));
-
-define('DB_PASS', DB_PASS !== '' ? DB_PASS : 'isidoro9');
+define('DB_PASS', getenv('DB_PASS') ?: (isset($_ENV['DB_PASS']) ? (string)$_ENV['DB_PASS'] : '') ?: 'isidoro9');
 
 
 

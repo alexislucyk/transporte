@@ -149,6 +149,9 @@ $choferes = $stmt->fetchAll();
                         <?php endif; ?>
                     </td>
                     <td style="text-align:center">
+                        <a href="choferes_ctacte?chofer_id=<?= (int)$c['id'] ?>" title="Cuenta Corriente" style="background:none; border:none; color:var(--accent); cursor:pointer; margin-right:8px;">
+                            <i class="fas fa-dollar-sign"></i>
+                        </a>
                         <button onclick='editChofer(<?= json_encode($c, JSON_HEX_APOS | JSON_HEX_QUOT) ?>)' title="Editar" style="background:none; border:none; color:var(--accent); cursor:pointer;">
                             <i class="fas fa-edit"></i>
                         </button>

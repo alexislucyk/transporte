@@ -304,10 +304,10 @@ function XOwner(PDO $pdo, int $id, int $tenantId, string $role): bool { ... }
 | vehiculos.php | ✅ Completo (244 líneas) |
 | mantenimiento.php | ✅ Completo (231 líneas) |
 | choferes.php | ✅ Completo (248 líneas) |
-| comisionistas.php | ❌ Pendiente |
-| comisionistas_ctacte.php | ❌ Pendiente |
-| choferes_ctacte.php | ❌ Pendiente |
-| choferes_liquidar.php | ❌ Pendiente |
+| comisionistas.php | ✅ Completo (279 líneas) |
+| comisionistas_ctacte.php | ✅ Completo (175 líneas) |
+| choferes_ctacte.php | ✅ Completo (188 líneas) |
+| choferes_liquidar.php | ✅ Completo (215 líneas) |
 | viajes.php | ❌ Pendiente |
 | viajes_detalle.php | ❌ Pendiente |
 | cobranzas.php | ❌ Pendiente |
@@ -315,4 +315,244 @@ function XOwner(PDO $pdo, int $id, int $tenantId, string $role): bool { ... }
 | cobranzas_fletes_liquidar.php | ❌ Pendiente |
 | cobranzas_fletes_factura.php | ❌ Pendiente |
 | tesoreria.php | ❌ Pendiente |
+
+---
+
+## 9. Implementación de `comisionistas.php` y `comisionistas_ctacte.php` (2026-06-25)
+
+### 9.1 Módulo `modules/comisionistas.php` (279 líneas)
+
+**Objetivo:** CRUD de comisionistas (clientes con `es_comisionista = 1`) con multi-tenancy estricto.
+
+**Decisiones de diseño:**
+
+1. **Reutiliza tabla `clientes`:** Un comisionista es un cliente con el flag `es_comisionista = 1`. No se creó tabla nueva; se filtra por `es_comisionista = 1` en todas las queries.
+2. **Multi-tenant estricto:**
+   - Todo listado filtra por `transportista_id = $_SESSION['active_company_id']`.
+   - Helper `comisionistaOwner(PDO, id, tenantId, role)`: valida que el cliente pertenezca al tenant activo y sea comisionista.
+3. **Acciones disponibles:** Alta, Edición, Borrado lógico (`activo = 0`).
+   - Borrado usa `appConfirm()` (helper global de `index.php`).
+4. **Vinculación a cuenta corriente:** Cada fila del listado tiene un ícono `fa-dollar-sign` que linkea a `comisionistas_ctacte?cliente_id=X`.
+5. **Checkbox pre-marcado:** En el modal de alta/edición, el checkbox "Comisionista" (`es_comisionista`) viene marcado por defecto.
+6. **Seguridad:** Todas las salidas HTML con `htmlspecialchars()` y `json_encode` con flags `JSON_HEX_APOS | JSON_HEX_QUOT`.
+
+### 9.2 Módulo `modules/comisionistas_ctacte.php` (175 líneas)
+
+**Objetivo:** Cuenta corriente de pagos a comisionistas (CRUD de pagos).
+
+**Decisiones de diseño:**
+
+1. **Dos modos de operación:**
+   - Sin `cliente_id` (GET): muestra selector de comisionistas para acceder a su cuenta corriente.
+   - Con `cliente_id`: muestra historial de pagos, total acumulado y formulario de nuevo pago.
+2. **Validación multi-tenant:** El helper `comisionistaOwner()` valida que el comisionista pertenezca al tenant activo antes de permitir registrar pagos.
+3. **Formulario de nuevo pago:** Campos: fecha (default hoy), monto, detalle. Al enviar, redirige con `?msg=1` para mostrar mensaje de éxito.
+4. **Resumen financiero:** Muestra el total pagado (`SUM(monto)`) al comisionista.
+5. **Tabla de historial:** Ordenada por fecha DESC, muestra fecha, monto (con formato `$ 1.234,56`) y detalle.
+
+### 9.3 Actualizaciones en archivos existentes
+
+**`index.php`:**
+- Agregado `case 'comisionistas_ctacte': include_once 'modules/comisionistas_ctacte.php';` en el switch de routing.
+
+**`includes/sidebar.php`:**
+- Agregado item de navegación: `navItem('comisionistas_ctacte', 'fa-dollar-sign', 'Cta. Cte. Comisiones', ...)`.
+
+**`modules/configuracion.php`:**
+- Agregado permiso `'comisionistas_ctacte' => 'Cta Cte Comisiones'` a la lista `$modulos_lista` en el modal de gestión de permisos.
+
+### 9.4 Verificación
+
+- ✅ `php -l` sin errores de sintaxis en ambos archivos.
+- ✅ Lint passed: `No syntax errors detected`.
+
+---
+
+## 10. Implementación de `choferes_ctacte.php` y `choferes_liquidar.php` (2026-06-25)
+
+### 10.1 Módulo `modules/choferes_ctacte.php` (188 líneas)
+
+**Objetivo:** Cuenta corriente de pagos a choferes (CRUD de pagos).
+
+**Decisiones de diseño:**
+
+1. **Dos modos de operación:**
+   - Sin `chofer_id` (GET): muestra selector de choferes para acceder a su cuenta corriente.
+   - Con `chofer_id`: muestra historial de pagos, total acumulado y formulario de nuevo pago.
+2. **Validación multi-tenant:** Helper `choferOwner()` (heredado de `choferes.php`) valida que el chofer pertenezca al tenant activo.
+3. **Tipos de pago:** `adelanto`, `sueldo`, `liquidacion`, `otro` (enum de la tabla `chofer_pagos`).
+4. **Formulario de nuevo pago:** Campos: fecha (default hoy), monto, tipo (select), detalle. Al enviar, redirige con `?msg=1`.
+5. **Resumen financiero:** Muestra el total movimientos (`SUM(monto)`).
+6. **Badges por tipo:** Colores diferenciados por tipo de pago (Adelanto=naranja, Suelo=azul, Liquidación=verde, Otro=gris).
+7. **Vinculación desde `choferes.php`:** Ícono `fa-dollar-sign` en la columna Acciones linkea a `choferes_ctacte?chofer_id=X`.
+
+### 10.2 Módulo `modules/choferes_liquidar.php` (215 líneas)
+
+**Objetivo:** Liquidación de viajes por chofer (gestión de saldos pendientes).
+
+**Decisiones de diseño:**
+
+1. **Cálculo de ganancia por viaje:** `total_flete_neto * chofer_porcentaje / 100` calculado en la query SQL.
+2. **Viajes filtrados:** Solo muestra viajes en estado `descargado` o `facturado` que tienen `activo = 1`.
+3. **Saldo pendiente:** Calcula `ganancia_total - total_liquidado` donde `total_liquidado` es la suma de todos los pagos de tipo `liquidacion` en `chofer_pagos`.
+4. **Tarjetas de resumen:** Muestra Ganancia Total, Ya Liquidado y Saldo Pendiente en tarjetas visuales separadas.
+5. **Acción de liquidación:** Formulario que registra un pago en `chofer_pagos` con `tipo = 'liquidacion'` por el monto del saldo pendiente. Redirige con `?msg=1`.
+6. **Historial de liquidaciones:** Tabla separada que muestra solo pagos de tipo `liquidacion` del chofer.
+7. **Selector de chofer:** Modo sin ID muestra lista de choferes para seleccionar.
+
+### 10.3 Actualizaciones en archivos existentes
+
+**`modules/choferes.php`:**
+- Agregado ícono `fa-dollar-sign` en la columna Acciones: `<a href="choferes_ctacte?chofer_id=...">`.
+
+**`index.php`:**
+- Agregado `case 'choferes_ctacte': include_once 'modules/choferes_ctacte.php';`.
+- Agregado `case 'choferes_liquidar': include_once 'modules/choferes_liquidar.php';` en el switch de routing.
+
+**`includes/sidebar.php`:**
+- Agregado `navItem('choferes_ctacte', 'fa-dollar-sign', 'Cta. Cte. Choferes', ...)`.
+- Agregado `navItem('choferes_liquidar', 'fa-calculator', 'Liquidar Choferes', ...)`.
+
+**`modules/configuracion.php`:**
+- Agregado permiso `'choferes_ctacte' => 'Cta Cte Choferes'`.
+- Agregado permiso `'choferes_liquidar' => 'Liquidar Choferes'`.
+- Corregido duplicado de `choferes_ctacte` que existía en la lista.
+
+### 10.4 Verificación
+
+- ✅ `php -l` sin errores de sintaxis en ambos archivos.
+- ✅ Lint passed: `No syntax errors detected`.
 ```
+
+---
+
+## 11. Implementación de `viajes.php` — Módulo Core (2026-06-26)
+
+### 11.1 Estado inicial
+
+El archivo `modules/viajes.php` existía con estructura parcial (~508 líneas) pero contenía **bugs críticos**:
+
+1. **`created_by` inexistente en schema**: El INSERT intentaba escribir en columna `created_by` que no existe en la tabla `viajes` (solo tiene `created_at`). Causaba error PDO en cada creación.
+2. **Cálculos prematuros**: `$total_flete_bruto` y `$total_flete_neto` se calculaban al inicio del bloque POST para TODAS las acciones, incluso `borrar`.
+3. **Falta filtro `activo = 1`** en queries de vehículos y otros selects poblando los combos.
+4. **Validaciones genéricas**: Usaba una sola condición larga con `||` que no discriminaba qué campo faltaba.
+5. **Sin flujo de descarga**: No existía acción para registrar el peso real al descargar ni el impacto contable automático en cuenta corriente del chofer.
+6. **Sin preview de peso neto**: No había cálculo en vivo del peso neto esperado.
+
+### 11.2 Cambios aplicados
+
+**a) Eliminación de `created_by`** — Se quitó del INSERT la columna `created_by`. La tabla `viajes` no tiene esa columna. Ahora inserta solo las 23 columnas que existen en el schema.
+
+**b) Reorganización de captura de POST** — Los valores se capturan al inicio del bloque POST (compartidos entre acciones), pero los cálculos financieros (`total_flete_bruto`, `total_flete_neto`) se realizan **dentro** de cada acción específica (`nuevo`, `editar`, `descargar`).
+
+**c) Validaciones descriptivas** — Se reemplazó la condición monolítica por un array `$campos_faltan` que enumera exactamente qué campos obligatorios no se completaron, mostrando mensaje claro.
+
+**d) Filtro `activo = 1` agregado** a todas las queries de datos iniciales:
+- `clientes` (es_comercial, es_comisionista, es_pagador)
+- `choferes`
+- `vehiculos`
+
+**e) Nueva acción: `descargar`** — Modal separado para registrar el peso real (bruto + tara) al momento de la descarga:
+- Calcula peso neto real (`peso_bruto_real - peso_tara_real`)
+- Actualiza `estado = 'descargado'`
+- **Impacto contable automático**: Si el viaje tiene chofer con `porcentaje_ganancia > 0`, registra automáticamente un pago de tipo `liquidacion` en `chofer_pagos` con el monto calculado (`total_flete_neto * chofer_porcentaje / 100`).
+
+**f) Preview en vivo de peso neto** — En el modal de descarga, JavaScript calcula en tiempo real `peso_bruto - peso_tara` y muestra el resultado formateado.
+
+**g) UI mejorada:**
+- Tabla ahora muestra columna "Chofer" y documentos combinados (CTG | CP | Otros)
+- Truncamiento inteligente de origen/destino con tooltip
+- Botón de descarga (ícono balanza) visible solo para viajes en estado `en_viaje`
+- Porcentaje de ganancia del chofer se auto-completa desde `data-porcentaje` en los options del select
+
+### 11.3 Estado del Roadmap (actualizado 2026-06-26)
+
+| Módulo | Estado |
+|--------|--------|
+| clientes.php | ✅ Completo |
+| vehiculos.php | ✅ Completo |
+| mantenimiento.php | ✅ Completo |
+| choferes.php | ✅ Completo |
+| comisionistas.php | ✅ Completo |
+| comisionistas_ctacte.php | ✅ Completo |
+| choferes_ctacte.php | ✅ Completo |
+| choferes_liquidar.php | ✅ Completo |
+| viajes.php | ✅ **Completo (633 líneas)** |
+| viajes_detalle.php | ❌ Pendiente |
+| cobranzas.php | ❌ Pendiente |
+| cobranzas_fletes_pendientes.php | ❌ Pendiente |
+| cobranzas_fletes_liquidar.php | ❌ Pendiente |
+| cobranzas_fletes_factura.php | ❌ Pendiente |
+| tesoreria.php | ❌ Pendiente |
+
+### 11.4 Verificación
+
+- ✅ `php -l` sin errores de sintaxis.
+- ✅ Lint passed: `No syntax errors detected in modules/viajes.php`.
+- ✅ Eliminado bug de `created_by` que rompía el INSERT.
+- ✅ Agregado flujo completo: Iniciar Viaje → Descargar (con impacto contable) → Listar/Filtrar.
+- ✅ Auto-asignación de chofer y acoplado al seleccionar vehículo.
+- ✅ Generación automática de código SD-##### cuando no hay documentación.
+- ✅ Multi-tenant 100% aislado (todas las queries filtran por `transportista_id`).
+
+---
+
+## 12. Implementación de `viajes_detalle.php` — Vista de Detalle (2026-06-26)
+
+### 12.1 Estado inicial
+El archivo `modules/viajes_detalle.php` existía pero estaba **completamente vacío** (0 líneas). Sin implementación alguna.
+
+### 12.2 Funcionalidad implementada
+
+**Módulo de detalle de viaje** que sirve como centro de comando para gestionar un viaje individual, con acciones habilitadas según el estado:
+
+**a) Acciones por estado (flujo de base.md §4):**
+- **Estado `en_viaje`**: Botones para agregar Gastos y Adelantos.
+- **Estado `descargado`**: Botón Facturar (modal con número de factura + fecha).
+- **Estado `facturado`**: Botón Registrar Cobro (modal con monto, retenciones, medio de cobro, fecha).
+- Los botones de acción se ocultan según estado correspondiente.
+
+**b) Gestión de gastos (`viajes_gastos`):**
+- Alta de gasto con: tipo (combustible, peaje, playa, reparación_ruta, otros), monto, descripción, pagado_por (empresa, adelanto, descuento_flete), fecha.
+- Listado con badges de color por tipo y por modalidad de pago.
+- Total de gastos calculado y mostrado en el footer de la tabla.
+- Eliminación lógica con `appConfirm()`.
+
+**c) Gestión de adelantos (`viajes_adelantos`):**
+- Alta de adelanto con: monto, método de pago, fecha.
+- **Impacto contable dual**: Al registrar un adelanto, se inserta automáticamente también en `chofer_pagos` con tipo `adelanto` (vinculado al `chofer_id` del viaje).
+- Listado con total acumulado.
+- Eliminación lógica.
+
+**d) Panel financiero resumido:**
+- TN Estimadas, Tarifa x TN, Total Flete Neto (verde)
+- Total Gastos cargados a la Empresa (amarillo)
+- Total Adelantos (rojo)
+- Peso Neto Real (mostrado solo si el viaje no está `en_viaje`)
+- Factura y Fecha de Cobro (si existen)
+
+**e) Paneles informativos:**
+- Datos del Viaje: grid con cliente, producto, origen, destino, fecha, vehículo, acoplado, chofer, % chofer, pagador.
+- Documentación y Comisión: CTG, CP, otros docs, tipo de comisión, valor, comisionista.
+- Observaciones (si existen).
+
+### 12.3 Estado del Roadmap (actualizado 2026-06-26)
+
+| Módulo | Estado |
+|--------|--------|
+| viajes.php | ✅ Completo |
+| viajes_detalle.php | ✅ **Completo (532 líneas)** |
+| cobranzas.php | ❌ Pendiente |
+| cobranzas_fletes_pendientes.php | ❌ Pendiente |
+| cobranzas_fletes_liquidar.php | ❌ Pendiente |
+| cobranzas_fletes_factura.php | ❌ Pendiente |
+| tesoreria.php | ❌ Pendiente |
+
+### 12.4 Verificación
+
+- ✅ `php -l` sin errores de sintaxis: `No syntax errors detected in modules/viajes_detalle.php`.
+- ✅ Validación multi-tenant: `viajeOwner()` verifica pertenencia al tenant antes de cualquier operación.
+- ✅ Flujo completo: En Viaje → agregar gastos/adelantos → Descargado → Facturar (desde viajes.php) → Facturado → Cobrar.
+- ✅ Impacto contable: adelantos se reflejan automáticamente en cuenta corriente del chofer.
+- ✅ Gastos categorizados: 5 categorías + filtro por pagado_por (empresa/adelanto/descuento_flete).
+- ✅ UI responsiva con grids adaptables, badges de colores y modales específicos.

@@ -205,6 +205,12 @@ if (!in_array($user_role, ['admin', 'developer']) && $module !== 'dashboard') {
             case 'choferes':
                 include_once 'modules/choferes.php';
                 break;
+            case 'choferes_ctacte':
+                include_once 'modules/choferes_ctacte.php';
+                break;
+            case 'choferes_liquidar':
+                include_once 'modules/choferes_liquidar.php';
+                break;
             case 'vehiculos':
                 include_once 'modules/vehiculos.php';
                 break;
@@ -217,10 +223,17 @@ if (!in_array($user_role, ['admin', 'developer']) && $module !== 'dashboard') {
             case 'comisionistas':
                 include_once 'modules/comisionistas.php';
                 break;
-            case 'viajes':
-                include_once 'modules/viajes.php';
+            case 'comisionistas_ctacte':
+                include_once 'modules/comisionistas_ctacte.php';
                 break;
-            case 'cobranzas':
+case 'viajes':
+                 include_once 'modules/viajes.php';
+                 break;
+            case 'viajes_detalle':
+                 include_once 'modules/viajes_detalle.php';
+                 break;
+
+             case 'cobranzas':
                 include_once 'modules/cobranzas.php';
                 break;
             case 'cobranzas_fletes_pendientes':

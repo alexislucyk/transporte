@@ -328,11 +328,12 @@ if (isset($_GET['success'])) $mensaje = $_GET['msg'] ?? "Configuración actualiz
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
                     <?php
                     $modulos_lista = [
-                        'viajes' => 'Viajes', 'choferes' => 'Choferes', 'cobranzas' => 'Cobranzas',
-                        'comisionistas' => 'Comisionistas', 'vehiculos' => 'Vehículos',
+                        'viajes' => 'Viajes', 'choferes' => 'Choferes', 'choferes_ctacte' => 'Cta Cte Choferes',
+                        'choferes_liquidar' => 'Liquidar Choferes', 'cobranzas' => 'Cobranzas',
+                        'comisionistas' => 'Comisionistas', 'comisionistas_ctacte' => 'Cta Cte Comisiones', 'vehiculos' => 'Vehículos',
                         'clientes' => 'Clientes', 'mantenimiento' => 'Mantenimiento',
                         'tesoreria' => 'Tesorería', 'empresas' => 'Empresas',
-                        'configuracion' => 'Configuración', 'choferes_ctacte' => 'Cta Cte Choferes'
+                        'configuracion' => 'Configuración'
                     ];
                     foreach ($modulos_lista as $key => $label): ?>
                         <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">

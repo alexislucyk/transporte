@@ -1,22 +1,19 @@
 <?php
 // DB config centralizada para Trans Cargo Hub.
-// Solución definitiva: eliminar dependencia de .env en runtime.
-// Se prioriza una constante hardcodeada segura para evitar bloqueos por loader.
-// Si más adelante querés .env, se puede reintroducir, pero ahora priorizamos que funcione.
+// Lee credenciales desde .env con fallbacks seguros.
 
-if (!defined('DB_HOST')) {
-    define('DB_HOST', 'localhost');
+function env_or_constant(string $key, string $fallback): string {
+    $val = getenv($key);
+    if ($val !== false && $val !== '') {
+        return $val;
+    }
+    return isset($_ENV[$key]) && $_ENV[$key] !== '' ? (string)$_ENV[$key] : $fallback;
 }
-if (!defined('DB_NAME')) {
-    define('DB_NAME', 'trans_dev_db');
-}
-if (!defined('DB_USER')) {
-    define('DB_USER', 'root');
-}
-if (!defined('DB_PASS')) {
-    // Password real de tu DB (según database_schema/db anterior del proyecto)
-    define('DB_PASS', '');
-}
+
+define('DB_HOST', env_or_constant('DB_HOST', 'localhost'));
+define('DB_NAME', env_or_constant('DB_NAME', 'trans_dev_db'));
+define('DB_USER', env_or_constant('DB_USER', 'root'));
+define('DB_PASS', env_or_constant('DB_PASS', 'isidoro9'));
 
 try {
     $pdo = new PDO(
