@@ -1,0 +1,22 @@
+/*
+  Escalado de tipografía para módulos de Viajes.
+  Regla: +10% en todo, excepto h1 y h2.
+*/
+
+/*
+  Escalado directo por IDs de módulos.
+  Nota: no dependemos de clases contenedoras, para evitar que no se aplique.
+*/
+
+#viajes-page *:not(h1):not(h2),
+#viajes_detalle-page *:not(h1):not(h2),
+#modal-viaje *:not(h1):not(h2),
+#modal-descarga *:not(h1):not(h2),
+#modal-facturar *:not(h1):not(h2),
+#modal-cobrar *:not(h1):not(h2),
+#modal-gasto *:not(h1):not(h2),
+#modal-adelanto *:not(h1):not(h2) {
+  font-size: 1.1em;
+}
+
+

@@ -43,8 +43,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <body>
     <div class="login-card">
         <img src="assets/logo01.png" alt="Logo" class="login-logo">
+
         <!-- <h1>Trans Cargo Hub</h1> -->
         <p>Inicia sesión para gestionar tu flota</p>
+
 
         <?php if($error): ?>
             <div class="error-msg"><i class="fas fa-times-circle"></i> <?= $error ?></div>

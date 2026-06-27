@@ -96,15 +96,131 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt = $pdo->prepare("INSERT INTO viajes_adelantos (viaje_id, monto, fecha, metodo_pago, activo) VALUES (?, ?, ?, ?, 1)");
                 $stmt->execute([$viaje_id, $monto_adelanto, $fecha_adelanto, $metodo_pago ?: null]);
 
-                // Registrar también en la cuenta corriente del chofer
-                if (!empty($viaje['chofer_id'])) {
-                    $stmt_pago = $pdo->prepare("INSERT INTO chofer_pagos (chofer_id, fecha, monto, tipo, detalle) VALUES (?, ?, ?, 'adelanto', ?)");
-                    $stmt_pago->execute([$viaje['chofer_id'], $fecha_adelanto, $monto_adelanto, "Adelanto viaje #{$viaje_id}"]);
-                }
+                // NOTA CONTABLE:
+                // El adelanto cargado al viaje NO se registra como movimiento en la cuenta corriente del chofer.
+                // Se registra recién en la descarga cuando se calcula el SOBRANTE del adelanto respecto a los gastos pagados por adelanto.
+                // (Evita registros falsos: adelanto -> se usa para gastos -> luego podría no sobrar nada).
 
                 $mensaje = "Adelanto registrado exitosamente.";
             } catch (PDOException $e) {
                 $error = "Error al registrar adelanto: " . $e->getMessage();
+            }
+        }
+    }
+
+    // ─── REGISTRAR DESCARGA ───────────────────────────
+    if ($action === 'descargar') {
+        $id = $viaje_id;
+
+        $usar_bruto_tara = isset($_POST['usar_bruto_tara']) ? (int)$_POST['usar_bruto_tara'] : 0;
+
+        // Modo por defecto: se ingresa el neto descargado directamente.
+        // Modo alternativo (cuando el usuario lo activa): se ingresa bruto y tara y se calcula el neto.
+        $peso_neto_real = (float)($_POST['peso_neto_real'] ?? 0);
+        $peso_bruto_real = 0;
+        $peso_tara_real  = 0;
+
+        if ($viaje['estado'] !== 'en_viaje') {
+            $error = "Solo se puede descargar un viaje en estado 'En Viaje'.";
+        } elseif ($peso_neto_real <= 0) {
+            // Validación del modo por defecto (neta)
+            $error = "El Peso Neto descargado debe ser mayor a 0.";
+        } elseif ($usar_bruto_tara === 1) {
+            $peso_bruto_real = (float)($_POST['peso_bruto_real'] ?? 0);
+            $peso_tara_real  = (float)($_POST['peso_tara_real'] ?? 0);
+
+            if ($peso_bruto_real <= 0) {
+                $error = "El Peso Bruto real debe ser mayor a 0.";
+            } elseif ($peso_tara_real < 0) {
+                $error = "La Tara no puede ser negativa.";
+            } else {
+                $peso_neto_real = max(0, $peso_bruto_real - $peso_tara_real);
+            }
+        }
+
+        if (!$error) {
+            // Preservar consistencia del TN Estimado vs Descargado.
+            // - Si se cargó Bruto/Tara: usamos lo ingresado.
+            // - Si se cargó Solo Neto: NO queremos sobrescribir el peso_bruto estimado (TN Est.).
+            //   En ese caso calculamos la tara necesaria para que el neto (GENERATED) quede = peso_neto_real.
+            if ($usar_bruto_tara !== 1) {
+                $peso_bruto_real = (float)($viaje['peso_bruto'] ?? 0);
+                if ($peso_bruto_real > 0) {
+                    $peso_tara_real = max(0, $peso_bruto_real - $peso_neto_real);
+                } else {
+                    // fallback: si por algún motivo el peso_bruto estimado no existe, usamos tara 0
+                    $peso_tara_real = 0;
+                }
+            }
+
+            $tarifa = (float)$viaje['tarifa_tonelada'];
+            $chofer_pct = (float)$viaje['chofer_porcentaje'];
+            $total_flete_bruto = ($peso_bruto_real > 0) ? ($peso_bruto_real * $tarifa) : ($peso_neto_real * $tarifa);
+            $total_flete_neto  = $peso_neto_real * $tarifa;
+
+            try {
+                $pdo->prepare("UPDATE viajes SET 
+                    peso_bruto = ?, peso_tara = ?,
+                    total_flete_bruto = ?, total_flete_neto = ?,
+                    estado = 'descargado'
+                    WHERE id = ? AND transportista_id = ? AND activo = 1")
+                    ->execute([$peso_bruto_real, $peso_tara_real, $total_flete_bruto, $total_flete_neto, $id, $active_company_id]);
+
+                // Impacto contable: registrar en cuenta corriente del chofer
+                if (!empty($viaje['chofer_porcentaje']) && $viaje['chofer_porcentaje'] > 0 && !empty($viaje['chofer_id'])) {
+                    $ganancia_chofer = $total_flete_neto * ($chofer_pct / 100);
+                    // Detalle del viaje para que el movimiento muestre CTG o CP (nunca solo número de viaje)
+                    $detalle_ref_liq = '';
+                    if (!empty($viaje['ctg_nro'])) {
+                        $detalle_ref_liq = 'CTG ' . $viaje['ctg_nro'];
+                    } elseif (!empty($viaje['carta_porte_nro'])) {
+                        $detalle_ref_liq = 'CP ' . $viaje['carta_porte_nro'];
+                    } elseif (!empty($viaje['otros_docs'])) {
+                        $detalle_ref_liq = $viaje['otros_docs'];
+                    } else {
+                        $detalle_ref_liq = 'Viaje #' . $id;
+                    }
+
+                    $stmt_pago = $pdo->prepare("INSERT INTO chofer_pagos (chofer_id, fecha, monto, tipo, detalle) VALUES (?, ?, ?, 'liquidacion', ?)");
+                    $stmt_pago->execute([$viaje['chofer_id'], date('Y-m-d'), $ganancia_chofer, "Liquidación de {$detalle_ref_liq}"]);
+
+                    // Segundo movimiento: si el adelanto alcanzó para gastos, el sobrante queda como adelanto en la cta cte del chofer.
+                    $stmtTA = $pdo->prepare("SELECT COALESCE(SUM(monto), 0) AS total FROM viajes_adelantos WHERE viaje_id = ? AND activo = 1");
+                    $stmtTA->execute([$id]);
+                    $total_adelantos = (float)$stmtTA->fetchColumn();
+
+                    $stmtG = $pdo->prepare("SELECT COALESCE(SUM(monto), 0) AS total FROM viajes_gastos WHERE viaje_id = ? AND activo = 1 AND pagado_por = 'adelanto'");
+                    $stmtG->execute([$id]);
+                    $gastos_pagados_por_adelanto = (float)$stmtG->fetchColumn();
+
+                    $sobrante = $total_adelantos - $gastos_pagados_por_adelanto;
+
+                    if ($sobrante > 0) {
+                        // Referencia del viaje para que coincida visualmente con otros movimientos.
+                        $detalle_ref = '';
+                        if (!empty($viaje['ctg_nro'])) {
+                            $detalle_ref = 'CTG ' . $viaje['ctg_nro'];
+                        } elseif (!empty($viaje['carta_porte_nro'])) {
+                            $detalle_ref = 'CP ' . $viaje['carta_porte_nro'];
+                        } elseif (!empty($viaje['otros_docs'])) {
+                            $detalle_ref = $viaje['otros_docs'];
+                        } else {
+                            $detalle_ref = 'Viaje #' . $id;
+                        }
+
+                        $stmt_sobrante = $pdo->prepare("INSERT INTO chofer_pagos (chofer_id, fecha, monto, tipo, detalle) VALUES (?, ?, ?, 'adelanto', ?)");
+                        $stmt_sobrante->execute([
+                            $viaje['chofer_id'],
+                            date('Y-m-d'),
+                            $sobrante,
+                            "Sobrante Adelanto {$detalle_ref}"
+                        ]);
+                    }
+                }
+
+                $mensaje = "Descarga registrada exitosamente. Peso Neto: " . number_format($peso_neto_real, 2, ',', '.') . " TN.";
+            } catch (PDOException $e) {
+                $error = "Error al registrar descarga: " . $e->getMessage();
             }
         }
     }
@@ -166,7 +282,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $adelanto_id = (int)($_POST['adelanto_id'] ?? 0);
         if ($adelanto_id > 0) {
             try {
-                $pdo->prepare("UPDATE viajes_adelantos SET activo = 0 WHERE id = ? AND viaje_id = ?")->execute([$adelanto_id, $viaje_id]);
+                // 1) Desactivar el registro (consistente con modelo actual de viajes_adelantos)
+                $pdo->prepare("UPDATE viajes_adelantos SET activo = 0 WHERE id = ? AND viaje_id = ?")
+                    ->execute([$adelanto_id, $viaje_id]);
+
+                // 2) Revertir el movimiento en la CTA cte del chofer (chofer_pagos no tiene 'activo')
+                //    Buscamos el adelanto para obtener monto/fecha/metodo y así identificar la fila creada en chofer_pagos.
+                $stmtA = $pdo->prepare("SELECT * FROM viajes_adelantos WHERE id = ? AND viaje_id = ? LIMIT 1");
+                $stmtA->execute([$adelanto_id, $viaje_id]);
+                $a = $stmtA->fetch();
+
+                if (!empty($a) && !empty($viaje['chofer_id'])) {
+                    $detalle_ref = '';
+                    if (!empty($viaje['ctg_nro'])) {
+                        $detalle_ref = 'CTG ' . $viaje['ctg_nro'];
+                    } elseif (!empty($viaje['carta_porte_nro'])) {
+                        $detalle_ref = 'CP ' . $viaje['carta_porte_nro'];
+                    } elseif (!empty($viaje['otros_docs'])) {
+                        $detalle_ref = $viaje['otros_docs'];
+                    } else {
+                        $detalle_ref = 'Viaje #' . $viaje_id;
+                    }
+
+                    $detalle_mov = "Adelanto {$detalle_ref}";
+
+                    $sql_delete = "DELETE FROM chofer_pagos
+                                   WHERE chofer_id = ?
+                                     AND tipo = 'adelanto'
+                                     AND fecha = ?
+                                     AND monto = ?
+                                     AND detalle = ?";
+                    $pdo->prepare($sql_delete)->execute([
+                        $viaje['chofer_id'],
+                        $a['fecha'],
+                        $a['monto'],
+                        $detalle_mov
+                    ]);
+                }
+
                 $mensaje = "Adelanto eliminado.";
             } catch (PDOException $e) {
                 $error = "Error al eliminar adelanto: " . $e->getMessage();
@@ -178,9 +331,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$viaje_id, $active_company_id]);
     $viaje = $stmt->fetch();
-}
+    }
 
 // ─── OBTENER GASTOS Y ADELANTOS ────────────────────────
+
 $gastos = [];
 $stmt = $pdo->prepare("SELECT * FROM viajes_gastos WHERE viaje_id = ? AND activo = 1 ORDER BY fecha DESC, id DESC");
 $stmt->execute([$viaje_id]);
@@ -201,15 +355,19 @@ foreach ($adelantos as $a) {
     $total_adelantos += (float)$a['monto'];
 }
 
-// ─── CALCULAR DIFERENCIAL ──────────────────────────────
+// ─── CALCULAR DIFERENCIAL (TN) ──────────────────────────
+// Diferencia entre el peso estimado y el descargado (neto real).
 $diferencial_tn = 0;
-$peso_neto_real = 0;
-if ($viaje['estado'] === 'descargado' || $viaje['estado'] === 'facturado' || $viaje['estado'] === 'cobrado' || $viaje['estado'] === 'liquidado') {
-    $peso_neto_real = (float)$viaje['peso_neto'];
-    // El peso neto es GENERATED ALWAYS AS (peso_bruto - peso_tara)
-    // Para el diferencial, comparamos con el peso bruto original estimado (si no hay tara inicial)
-    $diferencial_tn = $peso_neto_real; // placeholder
+    if ($viaje['estado'] === 'descargado' || $viaje['estado'] === 'facturado' || $viaje['estado'] === 'cobrado' || $viaje['estado'] === 'liquidado' || $viaje['estado'] === 'en_viaje') {
+
+    // peso_estimado guarda la TN estimada original (separada de la TN bruta usada en descarga)
+    $peso_estimado_tn = (float)($viaje['peso_estimado'] ?? $viaje['peso_bruto']);
+
+    // peso_neto es GENERATED ALWAYS AS (peso_bruto - peso_tara)
+    $peso_descargado_neto_tn = (float)$viaje['peso_neto'];
+    $diferencial_tn = $peso_descargado_neto_tn - $peso_estimado_tn;
 }
+
 
 // Badge de estado
 $estado_badge = match($viaje['estado']) {
@@ -221,7 +379,8 @@ $estado_badge = match($viaje['estado']) {
     default      => '<span class="badge">' . htmlspecialchars($viaje['estado']) . '</span>'
 };
 ?>
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+<div id="viajes_detalle-page" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+
     <div>
         <a href="viajes" style="text-decoration:none; color:var(--accent); margin-bottom:8px; display:inline-block;">
             <i class="fas fa-arrow-left"></i> Volver a Viajes
@@ -243,6 +402,12 @@ $estado_badge = match($viaje['estado']) {
         <span><?= $estado_badge ?></span>
     </div>
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <?php if ($viaje['estado'] === 'en_viaje'): ?>
+        <button onclick="openModal('modal-descarga')" class="btn-primary" style="background:#27ae60;">
+            <i class="fas fa-weight-hanging"></i> Registrar Descarga
+        </button>
+        <?php endif; ?>
+
         <?php if ($viaje['estado'] === 'descargado'): ?>
         <button onclick="openModal('modal-facturar')" class="btn-primary" style="background:#9b59b6;">
             <i class="fas fa-file-invoice"></i> Facturar
@@ -253,12 +418,12 @@ $estado_badge = match($viaje['estado']) {
             <i class="fas fa-hand-holding-usd"></i> Registrar Cobro
         </button>
         <?php endif; ?>
-        <button onclick="openModal('modal-gasto')" class="btn-secondary">
+        <!-- <button onclick="openModal('modal-gasto')" class="btn-secondary">
             <i class="fas fa-plus-circle"></i> Gasto
         </button>
         <button onclick="openModal('modal-adelanto')" class="btn-secondary">
             <i class="fas fa-hand-holding-usd"></i> Adelanto
-        </button>
+        </button> -->
     </div>
 </div>
 
@@ -268,6 +433,80 @@ $estado_badge = match($viaje['estado']) {
 <?php if ($error): ?>
 <div class="alert alert-error"><i class="fas fa-exclamation-triangle"></i> <?= htmlspecialchars($error) ?></div>
 <?php endif; ?>
+
+<!-- ══════════════════════════════════════════════════════════
+     MODAL: DESCARGA (usando estilos de la página)
+     ══════════════════════════════════════════════════════════ -->
+<div id="modal-descarga" class="modal">
+    <div class="modal-content" style="max-width:450px;">
+        <div class="modal-header" style="background:linear-gradient(135deg, #2c3e50, #34495e); color:#fff; padding:12px 16px; border-radius:10px 10px 0 0;">
+            <h3 style="margin:0; font-size:1.1rem;">
+                <i class="fas fa-weight-hanging" style="margin-right:8px;"></i> Registrar Descarga
+            </h3>
+            <span class="close-modal" onclick="closeModal('modal-descarga')" style="color:#fff; font-size:1.2rem;">&times;</span>
+        </div>
+        <form method="POST">
+            <div class="modal-body" style="padding:16px;">
+                <input type="hidden" name="action" value="descargar">
+
+
+
+                <div style="margin-bottom:12px;">
+                    <div class="card" style="margin:0; background:#f8f9fa; border:1px solid #e3e3e3;">
+                        <div style="padding:12px;">
+                            <p style="margin:0 0 10px 0; opacity:0.85; font-size:0.95rem;">
+                                Por defecto registrás <strong>solo el Neto</strong>. Activá la opción si querés cargar <strong>Bruto y Tara</strong>.
+                            </p>
+
+                            <label style="display:flex; align-items:center; gap:10px; cursor:pointer; user-select:none;">
+                                <input type="checkbox" id="descarga_usar_bruto_tara" name="usar_bruto_tara" value="1" onchange="toggleDescargaBrutoTara()">
+                                <span style="font-weight:bold;">Cargar Bruto y Tara</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label style="font-weight:bold;">Peso Neto Descargado (TN) *</label>
+                    <input type="number" step="0.01" min="0.01" name="peso_neto_real" class="input-field" required placeholder="0.00" style="width:100%;">
+                </div>
+
+                <div class="form-group" id="descarga_bruto_tara_block" style="margin-top:10px; display:none;">
+                    <label style="font-weight:bold;">Peso Bruto Real (TN)</label>
+                    <input type="number" step="0.01" min="0.01" name="peso_bruto_real" class="input-field" placeholder="0.00" style="width:100%;">
+
+                    <div style="margin-top:10px;">
+                        <label style="font-weight:bold;">Tara (TN)</label>
+                        <input type="number" step="0.01" min="0" name="peso_tara_real" class="input-field" value="0" placeholder="0.00" style="width:100%;">
+                    </div>
+                </div>
+
+                <script>
+                    function toggleDescargaBrutoTara() {
+                        const cb = document.getElementById('descarga_usar_bruto_tara');
+                        const block = document.getElementById('descarga_bruto_tara_block');
+                        if (!cb || !block) return;
+                        const enabled = cb.checked;
+                        block.style.display = enabled ? 'block' : 'none';
+                    }
+                    // Asegurar estado inicial: por defecto SIEMPRE solo neto
+                    document.addEventListener('DOMContentLoaded', () => {
+                        toggleDescargaBrutoTara();
+                    });
+                </script>
+
+            </div>
+            <div class="modal-footer" style="padding:14px 16px; display:flex; justify-content:space-between; gap:12px;">
+                <button type="button" class="btn-secondary" onclick="closeModal('modal-descarga')" style="background:#2c3e50; color:#fff; border:none; border-radius:10px; padding:10px 14px;">Cancelar</button>
+
+                <button type="submit" class="btn-primary" style="background:#27ae60; border:none; border-radius:10px; padding:10px 14px;">
+                    <i class="fas fa-check" style="margin-right:8px;"></i> Confirmar Descarga
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
 
 <!-- ══════════════════════════════════════════════════════════
      TARJETA: INFORMACIÓN DEL VIAJE (ESTILO VISUAL MEJORADO)
@@ -397,9 +636,10 @@ $estado_badge = match($viaje['estado']) {
                 <div style="background:#e8f5e9; border-radius:8px; padding:8px; text-align:center; border:1px solid #c8e6c9;">
                     <div style="font-size:0.65rem; color:#666; text-transform:uppercase;">TN Est.</div>
                     <div style="font-weight:bold; font-size:1rem; color:#2e7d32;">
-                        <?= number_format((float)$viaje['peso_bruto'], 1, ',', '.') ?>
+                        <?= number_format((float)($viaje['peso_estimado'] ?? $viaje['peso_bruto']), 1, ',', '.') ?>
                     </div>
                 </div>
+
                 <div style="background:#e3f2fd; border-radius:8px; padding:8px; text-align:center; border:1px solid #bbdefb;">
                     <div style="font-size:0.65rem; color:#666; text-transform:uppercase;">Tarifa</div>
                     <div style="font-weight:bold; font-size:1rem; color:#1565c0;">
@@ -417,6 +657,30 @@ $estado_badge = match($viaje['estado']) {
                     $ <?= number_format((float)$viaje['total_flete_neto'], 2, ',', '.') ?>
                 </div>
             </div>
+
+            <!-- Diferencia TN (Estimado vs Descargado) -->
+            <?php if (isset($diferencial_tn) && ((float)$viaje['peso_neto'] > 0 || (float)($viaje['peso_estimado'] ?? 0) > 0)): ?>
+
+                <?php
+
+                    $dtn = (float)$diferencial_tn;
+                    $color = ($dtn >= 0) ? '#27ae60' : '#e74c3c';
+                    $signo = ($dtn >= 0) ? '+' : '-';
+                    $abs = abs($dtn);
+                ?>
+                <div style="margin-top:8px; background:#fff; border-radius:10px; padding:10px 14px; text-align:center; border:1px solid rgba(0,0,0,0.08);">
+                    <div style="font-size:0.65rem; color:#666; text-transform:uppercase; letter-spacing:1px;">
+                        <i class="fas fa-weight"></i> Diferencia TN
+                    </div>
+                    <div style="font-size:1.25rem; font-weight:bold; color:<?= $color ?>;">
+                        <?= $signo ?><?= number_format($abs, 2, ',', '.') ?> TN
+                    </div>
+                    <div style="font-size:0.75rem; color:#777; margin-top:2px;">
+                        Est: <?= number_format((float)$viaje['peso_bruto'], 2, ',', '.') ?> TN → Desc: <?= number_format((float)$viaje['peso_neto'], 2, ',', '.') ?> TN
+                    </div>
+                </div>
+            <?php endif; ?>
+
 
             <!-- Documentación -->
             <?php 
@@ -520,7 +784,8 @@ $estado_badge = match($viaje['estado']) {
                     <td><?= $badge_pagado ?></td>
                     <td style="text-align:right; font-weight:bold;">$ <?= number_format((float)$g['monto'], 2, ',', '.') ?></td>
                     <td style="text-align:center;">
-                        <form method="POST" style="display:inline;" onsubmit="return appConfirm('¿Eliminar este gasto?', null, 'Eliminar Gasto')">
+                        <form method="POST" style="display:inline;" onsubmit="return appConfirm('¿Eliminar este gasto?', function(){ this.submit(); }.bind(this), 'Eliminar Gasto', this)" >
+
                             <input type="hidden" name="action" value="borrar_gasto">
                             <input type="hidden" name="gasto_id" value="<?= (int)$g['id'] ?>">
                             <button type="submit" title="Eliminar gasto" style="background:none; border:none; color:#e74c3c; cursor:pointer;">
@@ -574,7 +839,8 @@ $estado_badge = match($viaje['estado']) {
                     <td><?= htmlspecialchars($a['metodo_pago'] ?? '-') ?></td>
                     <td style="text-align:right; font-weight:bold;">$ <?= number_format((float)$a['monto'], 2, ',', '.') ?></td>
                     <td style="text-align:center;">
-                        <form method="POST" style="display:inline;" onsubmit="return appConfirm('¿Eliminar este adelanto?', null, 'Eliminar Adelanto')">
+                        <form method="POST" style="display:inline;" onsubmit="return appConfirm('¿Eliminar este adelanto?', function(){ this.submit(); }.bind(this), 'Eliminar Adelanto')" >
+
                             <input type="hidden" name="action" value="borrar_adelanto">
                             <input type="hidden" name="adelanto_id" value="<?= (int)$a['id'] ?>">
                             <button type="submit" title="Eliminar adelanto" style="background:none; border:none; color:#e74c3c; cursor:pointer;">

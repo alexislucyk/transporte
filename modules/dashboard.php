@@ -69,19 +69,24 @@ $stmt_agenda->execute([$active_company_id]);
 $agenda_pagos = $stmt_agenda->fetchAll();
 ?>
 
-<div style="margin-bottom: 30px;">
-    <h1 style="margin:0;">Panel de Control</h1>
-    <p style="margin:5px 0 0 0; opacity: 0.7;">Estado actual de la operativa.</p>
+<div class="card" style="margin-bottom: 30px; position: relative; overflow: hidden; border-left: 6px solid var(--accent);">
+    <div style="height:6px; background:linear-gradient(90deg, var(--accent), #2ecc71, #e67e22); position:absolute; top:0; left:0; right:0;"></div>
+    <div style="padding:16px 0 0 0;">
+        <h1 style="margin:0; font-size:1.8rem;">Panel de Control</h1>
+        <p style="margin:6px 0 0 0; opacity: 0.75;">Estado actual de la operativa.</p>
+    </div>
 </div>
 
 <style>
-    .stat-card { transition: transform 0.2s; border-bottom: none !important; border-top: 4px solid var(--accent); position: relative; cursor: pointer; text-decoration: none; color: inherit; display: block; }
+    .stat-card { transition: transform 0.2s; border-bottom: none !important; border-top: 5px solid var(--accent); position: relative; cursor: pointer; text-decoration: none; color: inherit; display: block; border-radius: 12px; overflow: hidden; }
     .stat-card:hover { transform: translateY(-5px); }
+    .stat-card::after { content: ''; position:absolute; inset:0; background: radial-gradient(circle at top left, rgba(255,255,255,0.22), transparent 55%); pointer-events:none; }
     .stat-card h3 { font-size: 1.8rem; margin: 10px 0 5px 0; }
     .stat-card p { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; font-weight: bold; }
-    .alert-box { background: #fff3cd; color: #856404; padding: 15px; border-radius: 8px; border: 1px solid #ffeeba; margin-bottom: 20px; display: flex; align-items: center; gap: 15px; }
+    .alert-box { background: #fff3cd; color: #856404; padding: 15px; border-radius: 10px; border: 1px solid #ffeeba; margin-bottom: 20px; display: flex; align-items: center; gap: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
     .alert-box.danger { background: #f8d7da; color: #721c24; border-color: #f5c6cb; }
 </style>
+
 
 <!-- Sección de Alertas -->
 <?php if ($alertas_vtv > 0 || $alertas_lic > 0): ?>

@@ -57,7 +57,7 @@ if ($user_role === 'developer') {
     // El desarrollador puede ver también las empresas inactivas (borrado lógico)
     $stmt_trans = $pdo->query("SELECT id, razon_social, activo FROM transportistas ORDER BY razon_social ASC");
 } else {
-$adminRootId = $_SESSION['admin_root_id'] ?? null;
+    $adminRootId = $_SESSION['admin_root_id'] ?? null;
 
     // Fallback: si no existe admin_root_id, para usuarios NO-developer asumimos
     // que sus empresas están creadas por el admin que figura en users.created_by.
@@ -156,10 +156,11 @@ if (!in_array($user_role, ['admin', 'developer']) && $module !== 'dashboard') {
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <base href="<?= $base_path ?>">
+<base href="<?= $base_path ?>">
     <title><?= $pageTitle ?> - Trans Cargo Hub</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="<?= $base_path ?>css/main.css">
+<link rel="stylesheet" href="<?= $base_path ?>css/font-scale-viajes.css">
     <style>
         :root {
             --sidebar-width: 280px;
@@ -226,14 +227,13 @@ if (!in_array($user_role, ['admin', 'developer']) && $module !== 'dashboard') {
             case 'comisionistas_ctacte':
                 include_once 'modules/comisionistas_ctacte.php';
                 break;
-case 'viajes':
-                 include_once 'modules/viajes.php';
-                 break;
+            case 'viajes':
+                include_once 'modules/viajes.php';
+                break;
             case 'viajes_detalle':
-                 include_once 'modules/viajes_detalle.php';
-                 break;
-
-             case 'cobranzas':
+                include_once 'modules/viajes_detalle.php';
+                break;
+            case 'cobranzas':
                 include_once 'modules/cobranzas.php';
                 break;
             case 'cobranzas_fletes_pendientes':
@@ -290,10 +290,25 @@ case 'viajes':
             document.getElementById('confirmTitle').innerText = title;
             confirmCallback = callback;
             openModal('confirmModal');
+            // Frenamos el submit automático para que el submit se dispare SOLO desde el callback.
+            return false;
         }
         function closeConfirm(result) {
+            if(!result) {
+                closeModal('confirmModal');
+                return;
+            }
+
+            // Ejecutar callback primero
+            if(confirmCallback) confirmCallback();
+
+            // Cerrar inmediatamente tras confirmar.
             closeModal('confirmModal');
-            if(result && confirmCallback) confirmCallback();
+
+            // Permitir submit manual si hace falta: cuando se usa appConfirm en onsubmit, al devolver false
+            // el form NO envía. Entonces no podemos reanudar automáticamente.
+            // En este app, los callbacks no hacen submit, así que la UI debe usar otro flujo.
+            // Por eso: solo usamos esta función para no romper, y dejamos el callback para navegación si aplica.
         }
 
         function toggleSidebar() {
@@ -328,3 +343,4 @@ case 'viajes':
     </script>
 </body>
 </html>
+

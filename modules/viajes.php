@@ -285,7 +285,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         if ($choferId) {
                             $ganancia_chofer = $total_flete_neto * ($chofer_pct / 100);
                             $stmt_pago = $pdo->prepare("INSERT INTO chofer_pagos (chofer_id, fecha, monto, tipo, detalle) VALUES (?, ?, ?, 'liquidacion', ?)");
-                            $stmt_pago->execute([$choferId, date('Y-m-d'), $ganancia_chofer, "Liquidación automática viaje #{$id}"]);
+
+                            // Referencia contable del viaje para el chofer: CTG > CP > Otros Docs > ID
+                            $detalle_ref = '';
+                            if (!empty($viaje_data['ctg_nro'])) {
+                                $detalle_ref = 'CTG ' . $viaje_data['ctg_nro'];
+                            } elseif (!empty($viaje_data['carta_porte_nro'])) {
+                                $detalle_ref = 'CP ' . $viaje_data['carta_porte_nro'];
+                            } elseif (!empty($viaje_data['otros_docs'])) {
+                                $detalle_ref = $viaje_data['otros_docs'];
+                            } else {
+                                $detalle_ref = 'Viaje #' . $id;
+                            }
+
+                            $stmt_pago->execute([
+                                $choferId,
+                                date('Y-m-d'),
+                                $ganancia_chofer,
+                                "Liquidación automática {$detalle_ref}"
+                            ]);
                         }
                     }
 
@@ -325,15 +343,33 @@ $stmt->execute($params);
 $viajes = $stmt->fetchAll();
 ?>
 <!-- Vista del listado -->
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+<div id="viajes-page" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+
     <div>
-        <h1>Operativa de Viajes</h1>
-        <p>Registra y gestiona los viajes de la empresa activa.</p>
+        <a href="inicio" style="text-decoration:none; color:var(--accent); margin-bottom:8px; display:inline-block;">
+            <i class="fas fa-arrow-left"></i> Inicio
+        </a>
+        <h1 style="margin:4px 0 0 0;">Operativa de Viajes</h1>
+        <p style="margin:6px 0 0 0; opacity:0.7;">Registra y gestiona los viajes de la empresa activa.</p>
     </div>
-    <button onclick="prepararNuevoViaje()" class="btn-primary">
-        <i class="fas fa-plus"></i> Nuevo Viaje
-    </button>
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <?php
+        $estado_badge = match($filtro_estado) {
+            'en_viaje'   => '<span class="badge" style="background:#f39c12; color:#fff;">🚛 En Viaje</span>',
+            'descargado' => '<span class="badge" style="background:#3498db; color:#fff;">📦 Descargado</span>',
+            'facturado'  => '<span class="badge" style="background:#9b59b6; color:#fff;">📄 Facturado</span>',
+            'cobrado'    => '<span class="badge" style="background:#27ae60; color:#fff;">💰 Cobrado</span>',
+            'liquidado'  => '<span class="badge" style="background:#95a5a6; color:#fff;">✅ Liquidado</span>',
+            default      => '<span class="badge">Todos</span>'
+        };
+        ?>
+        <span><?= $estado_badge ?></span>
+        <button onclick="prepararNuevoViaje()" class="btn-primary" style="background:#2ecc71;">
+            <i class="fas fa-plus"></i> Nuevo Viaje
+        </button>
+    </div>
 </div>
+
 
 <?php if ($mensaje): ?>
 <div class="alert alert-success">
@@ -347,21 +383,27 @@ $viajes = $stmt->fetchAll();
 </div>
 <?php endif; ?>
 
-<div class="card" style="margin-bottom: 20px; padding: 12px 16px;">
-    <form method="GET" style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-        <input type="hidden" name="route" value="viajes">
-        <label style="font-weight: bold; opacity: 0.8;">Filtrar por estado:</label>
-        <select name="estado" class="input-field" style="max-width: 220px;" onchange="this.form.submit()">
-            <option value="todos"        <?= $filtro_estado === 'todos' ? 'selected' : '' ?>>Todos</option>
-            <option value="en_viaje"     <?= $filtro_estado === 'en_viaje' ? 'selected' : '' ?>>En Viaje</option>
-            <option value="descargado"   <?= $filtro_estado === 'descargado' ? 'selected' : '' ?>>Descargado</option>
-            <option value="facturado"    <?= $filtro_estado === 'facturado' ? 'selected' : '' ?>>Facturado</option>
-            <option value="cobrado"      <?= $filtro_estado === 'cobrado' ? 'selected' : '' ?>>Cobrado</option>
-            <option value="liquidado"    <?= $filtro_estado === 'liquidado' ? 'selected' : '' ?>>Liquidado</option>
-        </select>
-        <span style="opacity: 0.6; font-size: 0.9rem;"><?= count($viajes) ?> resultado(s)</span>
-    </form>
+<div class="card" style="margin-bottom: 20px; position:relative; overflow:hidden;">
+    <div style="height:6px; background:linear-gradient(90deg, #2c3e50, #3498db, #2ecc71, #e67e22); position:absolute; top:0; left:0; right:0;"></div>
+    <div style="padding: 14px 16px;">
+        <form method="GET" style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <input type="hidden" name="route" value="viajes">
+            <label style="font-weight: bold; opacity: 0.8; display:flex; align-items:center; gap:8px;">
+                <i class="fas fa-filter" style="color:var(--accent);"></i> Filtrar por estado:
+            </label>
+            <select name="estado" class="input-field" style="max-width: 220px;" onchange="this.form.submit()">
+                <option value="todos"        <?= $filtro_estado === 'todos' ? 'selected' : '' ?>>Todos</option>
+                <option value="en_viaje"     <?= $filtro_estado === 'en_viaje' ? 'selected' : '' ?>>En Viaje</option>
+                <option value="descargado"   <?= $filtro_estado === 'descargado' ? 'selected' : '' ?>>Descargado</option>
+                <option value="facturado"    <?= $filtro_estado === 'facturado' ? 'selected' : '' ?>>Facturado</option>
+                <option value="cobrado"      <?= $filtro_estado === 'cobrado' ? 'selected' : '' ?>>Cobrado</option>
+                <option value="liquidado"    <?= $filtro_estado === 'liquidado' ? 'selected' : '' ?>>Liquidado</option>
+            </select>
+            <span style="opacity: 0.6; font-size: 0.9rem;"><?= count($viajes) ?> resultado(s)</span>
+        </form>
+    </div>
 </div>
+
 
 <div class="card">
     <?php if (empty($viajes)): ?>
@@ -412,19 +454,24 @@ $viajes = $stmt->fetchAll();
                     <td style="font-weight:bold;">$ <?= number_format($v['total_flete_neto'], 2, ',', '.') ?></td>
                     <td><?= $estado_badge ?></td>
                     <td style="text-align:center; white-space:nowrap;">
-                        <!-- Botón Descargar (solo en_viaje) -->
+
+
                         <?php if ($v['estado'] === 'en_viaje'): ?>
-                        <button onclick="prepararDescarga(<?= (int)$v['id'] ?>)" title="Registrar Descarga" style="background:none; border:none; color:#27ae60; cursor:pointer; margin-right:6px;">
+                        <!-- <a href="viajes_detalle?viaje_id=<?= (int)$v['id'] ?>" title="Registrar Descarga" style="background:none; border:none; color:#27ae60; cursor:pointer; margin-right:6px;">
                             <i class="fas fa-weight-hanging"></i>
-                        </button>
+                        </a> -->
                         <?php endif; ?>
 
                         <a href="viajes_detalle?viaje_id=<?= (int)$v['id'] ?>" title="Ver Detalle" style="background:none; border:none; color:var(--accent); cursor:pointer; margin-right:6px;">
                             <i class="fas fa-eye"></i>
                         </a>
-                        <button onclick='editViaje(<?= json_encode($v, JSON_HEX_APOS | JSON_HEX_QUOT) ?>)' title="Editar" style="background:none; border:none; color:var(--accent); cursor:pointer; margin-right:6px;">
+
+
+<button onclick='editViaje(<?= json_encode($v, JSON_HEX_APOS | JSON_HEX_QUOT) ?>)' title="Editar" style="background:none; border:none; color:var(--accent); cursor:pointer; margin-right:6px;">
+
                             <i class="fas fa-edit"></i>
                         </button>
+
                         <button onclick="confirmarBorrarViaje(<?= (int)$v['id'] ?>, '<?= htmlspecialchars($v['ctg_nro'] ?: 'Viaje #' . $v['id'], ENT_QUOTES) ?>')" title="Eliminar" style="background:none; border:none; color:#e74c3c; cursor:pointer;">
                             <i class="fas fa-trash-alt"></i>
                         </button>
@@ -442,13 +489,17 @@ $viajes = $stmt->fetchAll();
      ══════════════════════════════════════════════════════════ -->
 <div id="modal-viaje" class="modal">
     <div class="modal-content" style="max-width: 800px;">
-        <div class="modal-header">
-            <h3 style="margin:0" id="viaje-modal-title">Registrar Viaje</h3>
-            <span class="close-modal" onclick="closeModal('modal-viaje')">&times;</span>
+        <div class="modal-header" style="background:linear-gradient(135deg, #2c3e50, #34495e); color:#fff; padding:12px 16px; border-radius:10px 10px 0 0;">
+            <h3 style="margin:0; font-size:1.1rem;" id="viaje-modal-title">
+                <i class="fas fa-truck" style="margin-right:8px;"></i> Registrar Viaje
+            </h3>
+            <span class="close-modal" onclick="closeModal('modal-viaje')" style="color:#fff; font-size:1.2rem;">&times;</span>
         </div>
         <form method="POST" id="form-viaje">
-            <div class="modal-body">
+            <div class="modal-body" style="padding:16px;">
+
                 <input type="hidden" name="action" id="viaje-action" value="nuevo">
+
                 <input type="hidden" name="id" id="viaje-id">
 
                 <!-- Fila 1: Cliente + Producto -->
@@ -600,43 +651,9 @@ $viajes = $stmt->fetchAll();
     </div>
 </div>
 
-<!-- ══════════════════════════════════════════════════════════
-     MODAL: DESCARGA (peso real)
-     ══════════════════════════════════════════════════════════ -->
-<div id="modal-descarga" class="modal">
-    <div class="modal-content" style="max-width: 450px;">
-        <div class="modal-header">
-            <h3 style="margin:0">Registrar Descarga</h3>
-            <span class="close-modal" onclick="closeModal('modal-descarga')">&times;</span>
-        </div>
-        <form method="POST" id="form-descarga">
-            <div class="modal-body">
-                <input type="hidden" name="action" value="descargar">
-                <input type="hidden" name="id" id="descarga-viaje-id">
-                <div class="form-group">
-                    <label>Peso Bruto Real (TN) *</label>
-                    <input type="number" step="0.01" min="0.01" name="peso_bruto_real" id="descarga-peso-bruto" class="input-field" required placeholder="0.00">
-                </div>
-                <div class="form-group">
-                    <label>Tara (TN)</label>
-                    <input type="number" step="0.01" min="0" name="peso_tara_real" id="descarga-peso-tara" class="input-field" value="0" placeholder="0.00">
-                </div>
-                <div style="background:#f8f9fa; padding:12px; border-radius:8px; margin-top:8px;">
-                    <p style="margin:4px 0;"><strong>Peso Neto estimado:</strong> <span id="descarga-peso-neto-preview">0,00</span> TN</p>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn-secondary" onclick="closeModal('modal-descarga')">Cancelar</button>
-                <button type="submit" class="btn-primary" style="background:#27ae60;">
-                    <i class="fas fa-check"></i> Confirmar Descarga
-                </button>
-            </div>
-        </form>
-    </div>
-</div>
-
 <!-- Formulario oculto para borrar -->
 <form id="form-borrar-viaje" method="POST" style="display:none;">
+
     <input type="hidden" name="action" value="borrar">
     <input type="hidden" name="id" id="borrar-viaje-id">
 </form>
@@ -694,14 +711,7 @@ function editViaje(data) {
     openModal('modal-viaje');
 }
 
-// ─── MODAL DESCARGA ─────────────────────────────────────
-function prepararDescarga(viajeId) {
-    document.getElementById('descarga-viaje-id').value = viajeId;
-    document.getElementById('descarga-peso-bruto').value = '';
-    document.getElementById('descarga-peso-tara').value = 0;
-    document.getElementById('descarga-peso-neto-preview').innerText = '0,00';
-    openModal('modal-descarga');
-}
+
 
 // ─── BORRAR VIAJE ───────────────────────────────────────
 function confirmarBorrarViaje(id, nombre) {
@@ -743,16 +753,7 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('viaje-chofer-porcentaje').value = pct;
     }
 
-    // Preview de peso neto en modal descarga
-    var pesoBrutoInput = document.getElementById('descarga-peso-bruto');
-    var pesoTaraInput = document.getElementById('descarga-peso-tara');
-    function actualizarPreviewNeto() {
-        var bruto = parseFloat(pesoBrutoInput.value) || 0;
-        var tara = parseFloat(pesoTaraInput.value) || 0;
-        var neto = Math.max(0, bruto - tara);
-        document.getElementById('descarga-peso-neto-preview').innerText = neto.toFixed(2).replace('.', ',');
-    }
-    if (pesoBrutoInput) pesoBrutoInput.addEventListener('input', actualizarPreviewNeto);
-    if (pesoTaraInput) pesoTaraInput.addEventListener('input', actualizarPreviewNeto);
+
 });
 </script>
+
