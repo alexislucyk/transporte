@@ -8,8 +8,54 @@
 
 $mensaje = "";
 $error = "";
-$active_company_id = $_SESSION['active_company_id'] ?? 0;
+
+// Role actual (necesario para resolver tenant; debe definirse antes del bloque de tenant resolution)
 $currentRole = $_SESSION['user_role'] ?? 'user';
+
+/**
+ * Tenant resolution:
+ * En algunos casos $_SESSION['active_company_id'] puede venir en 0/NULL (y deja selects vacíos).
+ * Por regla del sistema, siempre debe existir una empresa activa para este módulo.
+ * Replicamos la resolución de tenant que hace index.php.
+ */
+$active_company_id = $_SESSION['active_company_id'] ?? 0;
+
+if ((int)$active_company_id <= 0) {
+    if ($currentRole === 'developer') {
+        $stmt_trans = $pdo->query("SELECT id FROM transportistas ORDER BY razon_social ASC LIMIT 1");
+        $active_company_id = (int)($stmt_trans->fetchColumn() ?: 0);
+    } else {
+        $adminRootId = $_SESSION['admin_root_id'] ?? null;
+
+        if (!$adminRootId) {
+            $stmtAdmin = $pdo->prepare("SELECT created_by FROM users WHERE id = ? AND role <> 'developer' LIMIT 1");
+            $stmtAdmin->execute([$_SESSION['user_id']]);
+            $adminRootId = (int)($stmtAdmin->fetchColumn() ?: 0);
+        }
+
+        if (!$adminRootId) {
+            $adminRootId = (int)$_SESSION['user_id'];
+        }
+
+        $stmt_trans = $pdo->prepare("SELECT id FROM transportistas WHERE created_by = ? ORDER BY razon_social ASC LIMIT 1");
+        $stmt_trans->execute([$adminRootId]);
+        $active_company_id = (int)($stmt_trans->fetchColumn() ?: 0);
+    }
+
+    if ($active_company_id > 0) {
+        $_SESSION['active_company_id'] = $active_company_id;
+    }
+}
+
+if ((int)$active_company_id <= 0) {
+    echo '<div class="card" style="text-align:center; padding:60px 20px; max-width:700px; margin:30px auto;">';
+    echo '<i class="fas fa-exclamation-triangle fa-4x" style="color:#e74c3c; margin-bottom:20px;"></i>';
+    echo '<h2 style="margin:0 0 10px 0;">No hay empresa activa disponible</h2>';
+    echo '<p style="opacity:0.7; margin:0 0 20px 0;">Seleccioná o creá una empresa en el módulo Empresas.</p>';
+    echo '<a href="empresas" class="btn-primary" style="margin-top:10px; display:inline-block;"><i class="fas fa-arrow-left"></i> Ir a Empresas</a>';
+    echo '</div>';
+    return;
+}
 
 // ─── HELPERS ──────────────────────────────────────────────
 function viajeOwner(PDO $pdo, int $id, int $tenantId, string $currentRole): bool {
@@ -68,8 +114,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     $producto       = trim($_POST['producto'] ?? '');
     $fecha_carga    = $_POST['fecha_carga'] ?? date('Y-m-d');
     $tarifa_tonelada = (float)($_POST['tarifa_tonelada'] ?? 0);
-    $peso_bruto_est = (float)($_POST['peso_bruto'] ?? 0); // TN Estimadas (se guarda en peso_bruto inicial)
+    $peso_bruto_est = (float)($_POST['peso_estimado'] ?? 0); // TN Estimadas
+
+
     $peso_tara      = (float)($_POST['peso_tara'] ?? 0);
+    $peso_estimado_tn = (float)($_POST['peso_estimado'] ?? $peso_bruto_est); // Nuevo: mantener peso estimado
+    $peso_estimado_tn = max(0, $peso_estimado_tn);
+
+
+
     $chofer_porcentaje = (float)($_POST['chofer_porcentaje'] ?? 0);
     $comision_tipo  = $_POST['comision_tipo'] ?? 'ninguna';
     $comision_valor = (float)($_POST['comision_valor'] ?? 0);
@@ -104,24 +157,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
             // Cálculos financieros iniciales
             $total_flete_bruto = $peso_bruto_est * $tarifa_tonelada;
-            $total_flete_neto  = $total_flete_bruto; // Sin tara aún (es TN estimadas)
+                    $total_flete_neto  = $total_flete_bruto; // Sin tara aún (es TN estimadas)
+
+                    // Peso estimado (TN) - guardar en columna peso_estimado
+                    $peso_estimado = $peso_estimado_tn;
 
             try {
-                $sql = "INSERT INTO viajes 
+                $sql = "INSERT INTO viajes
                     (transportista_id, cliente_id, chofer_id, vehiculo_id, acoplado,
                      origen, destino, producto, fecha_carga,
                      peso_bruto, peso_tara, tarifa_tonelada,
                      total_flete_bruto, total_flete_neto, chofer_porcentaje,
                      comision_tipo, comision_valor, comisionista_id,
                      ctg_nro, carta_porte_nro, otros_docs,
-                     pagador_id, observaciones, activo)
+                     pagador_id, observaciones, activo, peso_estimado)
                     VALUES (?, ?, ?, ?, ?,
                             ?, ?, ?, ?,
                             ?, ?, ?,
                             ?, ?, ?,
                             ?, ?, ?,
                             ?, ?, ?,
-                            ?, ?, 1)";
+                            ?, ?, ?, ?)";
 
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([
@@ -147,10 +203,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     $carta_porte_nro ?: null,
                     $otros_docs ?: null,
                     $pagador_id > 0 ? $pagador_id : null,
-                    $observaciones ?: null
+                    $observaciones ?: null,
+                    1, // activo
+                    $peso_estimado
                 ]);
 
+
+
                 $mensaje = "Viaje registrado exitosamente.";
+
             } catch (PDOException $e) {
                 $error = "Error al registrar viaje: " . $e->getMessage();
             }
@@ -189,8 +250,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         total_flete_bruto = ?, total_flete_neto = ?,
                         comision_tipo = ?, comision_valor = ?, comisionista_id = ?,
                         ctg_nro = ?, carta_porte_nro = ?, otros_docs = ?,
-                        pagador_id = ?, observaciones = ?
+                    pagador_id = ?, observaciones = ?,
+                    peso_estimado = ?
                         WHERE id = ? AND transportista_id = ? AND activo = 1";
+
 
                     $stmt = $pdo->prepare($sql);
                     $stmt->execute([
@@ -215,9 +278,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         $otros_docs ?: null,
                         $pagador_id > 0 ? $pagador_id : null,
                         $observaciones ?: null,
+                        $peso_estimado_tn,
                         $id,
                         $active_company_id
                     ]);
+
 
                     $mensaje = "Viaje actualizado exitosamente.";
                 } catch (PDOException $e) {
@@ -245,27 +310,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     // ─── ACCION: ACTUALIZAR DESCARGA (peso real) ─────────
     if ($_POST['action'] === 'descargar') {
         $id = (int)($_POST['id'] ?? 0);
+
+        $usar_bruto_tara = isset($_POST['usar_bruto_tara']) ? (int)$_POST['usar_bruto_tara'] : 0;
+        $peso_neto_real  = (float)($_POST['peso_neto_real'] ?? 0);
         $peso_bruto_real = (float)($_POST['peso_bruto_real'] ?? 0);
         $peso_tara_real  = (float)($_POST['peso_tara_real'] ?? 0);
 
         if ($id <= 0 || !viajeOwner($pdo, $id, $active_company_id, $currentRole)) {
             $error = "No autorizado: el viaje no existe o pertenece a otro tenant.";
-        } elseif ($peso_bruto_real <= 0) {
-            $error = "El Peso Bruto real debe ser mayor a 0.";
-        } elseif ($peso_tara_real < 0) {
-            $error = "La Tara no puede ser negativa.";
-        } else {
-            $peso_neto_real = max(0, $peso_bruto_real - $peso_tara_real);
+        } elseif ($peso_neto_real <= 0) {
+            $error = "El Peso Neto descargado debe ser mayor a 0.";
+        } elseif ($usar_bruto_tara === 1) {
+            // Modo: usuario carga Bruto y Tara
+            if ($peso_bruto_real <= 0) {
+                $error = "El Peso Bruto real debe ser mayor a 0.";
+            } elseif ($peso_tara_real < 0) {
+                $error = "La Tara no puede ser negativa.";
+            } else {
+                $peso_neto_real = max(0, $peso_bruto_real - $peso_tara_real);
+            }
+        }
+
+        if (!$error) {
             // Obtener la tarifa actual del viaje
             $stmt = $pdo->prepare("SELECT tarifa_tonelada, chofer_porcentaje FROM viajes WHERE id = ? AND transportista_id = ? AND activo = 1");
             $stmt->execute([$id, $active_company_id]);
             $viaje_data = $stmt->fetch();
-            
+
             if (!$viaje_data) {
                 $error = "Viaje no encontrado.";
             } else {
                 $tarifa = (float)$viaje_data['tarifa_tonelada'];
                 $chofer_pct = (float)$viaje_data['chofer_porcentaje'];
+
+                // Si NO se cargó bruto/tara, persistimos neto de forma consistente
+                if ($usar_bruto_tara !== 1) {
+                    $peso_bruto_real = $peso_neto_real;
+                    $peso_tara_real = 0;
+                }
+
                 $total_flete_bruto = $peso_bruto_real * $tarifa;
                 $total_flete_neto  = $peso_neto_real * $tarifa;
 
@@ -276,6 +359,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         estado = 'descargado'
                         WHERE id = ? AND transportista_id = ? AND activo = 1")
                         ->execute([$peso_bruto_real, $peso_tara_real, $total_flete_bruto, $total_flete_neto, $id, $active_company_id]);
+
 
                     // Impacto contable: registrar en cuenta corriente del chofer
                     if (!empty($viaje_data['chofer_porcentaje']) && $viaje_data['chofer_porcentaje'] > 0) {
@@ -316,7 +400,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 }
 
-// ─── LISTADO DE VIAJES ────────────────────────────────
+// El estado "liquidado" en la lista principal se refiere a viajes que han pasado por la etapa de descarga y cuyos pagos/gastos asociados han sido liquidados internamente (e.g., el chofer recibió su liquidación), pero aún no necesariamente facturados o cobrados formalmente al cliente/pagador de flete. Es un estado intermedio post-descarga y pre-facturación/cobro.
 $filtro_estado = $_GET['estado'] ?? 'todos';
 $where_estado = "";
 $params = [$active_company_id];
@@ -467,10 +551,12 @@ $viajes = $stmt->fetchAll();
                         </a>
 
 
-<button onclick='editViaje(<?= json_encode($v, JSON_HEX_APOS | JSON_HEX_QUOT) ?>)' title="Editar" style="background:none; border:none; color:var(--accent); cursor:pointer; margin-right:6px;">
+                        <?php if ($v['estado'] === 'en_viaje'): ?>
+                            <button onclick='editViaje(<?= json_encode($v, JSON_HEX_APOS | JSON_HEX_QUOT) ?>)' title="Editar" style="background:none; border:none; color:var(--accent); cursor:pointer; margin-right:6px;">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                        <?php endif; ?>
 
-                            <i class="fas fa-edit"></i>
-                        </button>
 
                         <button onclick="confirmarBorrarViaje(<?= (int)$v['id'] ?>, '<?= htmlspecialchars($v['ctg_nro'] ?: 'Viaje #' . $v['id'], ENT_QUOTES) ?>')" title="Eliminar" style="background:none; border:none; color:#e74c3c; cursor:pointer;">
                             <i class="fas fa-trash-alt"></i>
@@ -580,16 +666,18 @@ $viajes = $stmt->fetchAll();
                     </div>
                 </div>
 
-                <!-- Fila 5: Fecha + TN Estimadas + Tarifa -->
+                <!-- Fila 5: Fecha + TN Estimadas (Peso Estimado) + Tarifa -->
                 <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+
                     <div class="form-group">
                         <label>Fecha de Carga *</label>
                         <input type="date" name="fecha_carga" id="viaje-fecha-carga" class="input-field" required>
                     </div>
                     <div class="form-group">
                         <label>TN Estimadas *</label>
-                        <input type="number" step="0.01" min="0.01" name="peso_bruto" id="viaje-peso-bruto" class="input-field" required placeholder="0.00">
+                        <input type="number" step="0.01" min="0.01" name="peso_estimado" id="viaje-peso-estimado" class="input-field" required placeholder="0.00">
                     </div>
+
                     <div class="form-group">
                         <label>Tarifa por TN ($) *</label>
                         <input type="number" step="0.01" min="0.01" name="tarifa_tonelada" id="viaje-tarifa" class="input-field" required placeholder="0.00">
@@ -664,50 +752,80 @@ function prepararNuevoViaje() {
     document.getElementById('viaje-modal-title').innerText = "Registrar Nuevo Viaje";
     document.getElementById('viaje-action').value = "nuevo";
     document.getElementById('viaje-id').value = "";
-    document.querySelector('#form-viaje').reset();
+
+    // evitar que listeners pisen valores durante el reset
+    window.__viaje_isInitializing = true;
+
+    // Reset del form (evitar .reset() por listeners/inputs inconsistentes)
     document.getElementById('viaje-fecha-carga').value = new Date().toISOString().split('T')[0];
+    document.getElementById('viaje-peso-estimado').value = 0;
+    document.getElementById('viaje-tarifa').value = 0;
+
     document.getElementById('viaje-comision-tipo').value = 'ninguna';
     document.getElementById('viaje-comision-valor').value = 0;
     document.getElementById('viaje-comisionista').value = 0;
+
     document.getElementById('viaje-pagador').value = '';
+    document.getElementById('viaje-vehiculo').value = '';
+    document.getElementById('viaje-acoplado').value = '';
+    document.getElementById('viaje-chofer').value = 0;
     document.getElementById('viaje-chofer-porcentaje').value = 0;
+
+    document.getElementById('viaje-ctg').value = '';
+    document.getElementById('viaje-carta-porte').value = '';
+    document.getElementById('viaje-otros-docs').value = '';
+    document.getElementById('viaje-origen').value = '';
+    document.getElementById('viaje-destino').value = '';
+    document.getElementById('viaje-producto').value = '';
+    document.getElementById('viaje-observaciones').value = '';
+
+    window.__viaje_isInitializing = false;
+
     openModal('modal-viaje');
 }
+
 
 // ─── EDITAR VIAJE ───────────────────────────────────────
 function editViaje(data) {
     document.getElementById('viaje-modal-title').innerText = "Editar Viaje #" + data.id;
     document.getElementById('viaje-action').value = "editar";
     document.getElementById('viaje-id').value = data.id;
-    document.getElementById('viaje-cliente').value = data.cliente_id || '';
-    document.getElementById('viaje-chofer').value = data.chofer_id || 0;
-    document.getElementById('viaje-vehiculo').value = data.vehiculo_id || '';
+
+    // Evitar que listeners (vehiculo) pisen valores durante el set inicial
+    window.__viaje_isInitializing = true;
+
+    document.getElementById('viaje-cliente').value = data.cliente_id ?? '';
+
+    document.getElementById('viaje-vehiculo').value = data.vehiculo_id ?? '';
     document.getElementById('viaje-acoplado').value = data.acoplado || '';
+
+    document.getElementById('viaje-chofer').value = data.chofer_id ?? 0;
+
     document.getElementById('viaje-origen').value = data.origen || '';
     document.getElementById('viaje-destino').value = data.destino || '';
     document.getElementById('viaje-producto').value = data.producto || '';
     document.getElementById('viaje-fecha-carga').value = data.fecha_carga || '';
-    document.getElementById('viaje-peso-bruto').value = data.peso_bruto || 0;
+    document.getElementById('viaje-peso-estimado').value = data.peso_estimado || 0;
+
     document.getElementById('viaje-tarifa').value = data.tarifa_tonelada || 0;
     document.getElementById('viaje-ctg').value = data.ctg_nro || '';
     document.getElementById('viaje-carta-porte').value = data.carta_porte_nro || '';
     document.getElementById('viaje-otros-docs').value = data.otros_docs || '';
+
     document.getElementById('viaje-comision-tipo').value = data.comision_tipo || 'ninguna';
     document.getElementById('viaje-comision-valor').value = data.comision_valor || 0;
     document.getElementById('viaje-comisionista').value = data.comisionista_id || 0;
+
     document.getElementById('viaje-pagador').value = data.pagador_id || '';
     document.getElementById('viaje-observaciones').value = data.observaciones || '';
 
-    // Recuperar porcentaje del chofer desde los options
-    var choferSelect = document.getElementById('viaje-chofer');
-    var pct = 0;
-    for (var i = 0; i < choferSelect.options.length; i++) {
-        if (choferSelect.options[i].value == data.chofer_id) {
-            pct = choferSelect.options[i].getAttribute('data-porcentaje') || 0;
-            break;
-        }
-    }
+    // Sin depender de change: recalcular porcentaje en base al chofer seteado
+    const select = document.getElementById('viaje-chofer');
+    const selectedOption = select.options[select.selectedIndex];
+    const pct = selectedOption ? (parseFloat(selectedOption.getAttribute('data-porcentaje')) || 0) : 0;
     document.getElementById('viaje-chofer-porcentaje').value = pct;
+
+    window.__viaje_isInitializing = false;
     openModal('modal-viaje');
 }
 
@@ -723,13 +841,18 @@ function confirmarBorrarViaje(id, nombre) {
 
 // ─── INICIALIZACIÓN ─────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
+    var isInit = () => !!window.__viaje_isInitializing;
+
     // Al seleccionar vehículo → auto-asignar chofer y acoplado
     var vehiculoSelect = document.getElementById('viaje-vehiculo');
     if (vehiculoSelect) {
         vehiculoSelect.addEventListener('change', function() {
+            if (isInit()) return;
+
             var selectedOption = this.options[this.selectedIndex];
             var choferId = selectedOption.getAttribute('data-chofer');
             var acoplado = selectedOption.getAttribute('data-acoplado');
+
             document.getElementById('viaje-chofer').value = choferId || '0';
             document.getElementById('viaje-acoplado').value = acoplado || '';
 
