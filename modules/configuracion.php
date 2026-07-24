@@ -6,6 +6,99 @@
 $mensaje = "";
 $error = "";
 
+// ─── CARGAR ADMINS CON SUS LÍMITES (para la pestaña Límites) ──
+$admins_con_limites = [];
+if (($_SESSION['user_role'] ?? '') === 'developer') {
+    try {
+        $stmt = $pdo->query("
+            SELECT u.id, u.username, u.full_name, u.created_at,
+                   COALESCE(al.limite_empresas, 0) as limite_empresas,
+                   COALESCE(al.limite_vehiculos, 0) as limite_vehiculos,
+                   COALESCE(al.limite_choferes, 0) as limite_choferes
+            FROM users u
+            LEFT JOIN admin_limites al ON al.admin_id = u.id
+            WHERE u.role = 'admin'
+            ORDER BY u.username ASC
+        ");
+        $admins_con_limites = $stmt->fetchAll();
+    } catch (PDOException $e) {
+        // Si la tabla admin_limites no existe, se ignora
+    }
+}
+
+// ─── PROCESAR GUARDADO DE LÍMITES INDIVIDUALES (solo developer) ──
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['guardar_limites_admin'])) {
+    $isDev = ($_SESSION['user_role'] ?? '') === 'developer';
+        if (!$isDev) {
+            if (isset($_POST['ajax']) && $_POST['ajax'] == 1) {
+                while (ob_get_level() > 0) { ob_end_clean(); }
+                header('Content-Type: application/json');
+                echo json_encode([
+                    'success' => false,
+                    'error' => "Solo el desarrollador puede configurar límites."
+                ]);
+                exit;
+            }
+            $error = "Solo el desarrollador puede configurar límites.";
+    } else {
+        $admin_id = (int)($_POST['admin_id'] ?? 0);
+        if ($admin_id <= 0) {
+            if (isset($_POST['ajax']) && $_POST['ajax'] == 1) {
+                while (ob_get_level() > 0) { ob_end_clean(); }
+                header('Content-Type: application/json');
+                echo json_encode([
+                    'success' => false,
+                    'error' => "ID de administrador inválido."
+                ]);
+                exit;
+            }
+            $error = "ID de administrador inválido.";
+        } else {
+            $nuevo_limite_empresas  = max(0, (int)($_POST['limite_empresas'] ?? 0));
+            $nuevo_limite_vehiculos = max(0, (int)($_POST['limite_vehiculos'] ?? 0));
+            $nuevo_limite_choferes  = max(0, (int)($_POST['limite_choferes'] ?? 0));
+            try {
+                $pdo->prepare("
+                    INSERT INTO admin_limites (admin_id, limite_empresas, limite_vehiculos, limite_choferes)
+                    VALUES (?, ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE
+                        limite_empresas = VALUES(limite_empresas),
+                        limite_vehiculos = VALUES(limite_vehiculos),
+                        limite_choferes = VALUES(limite_choferes)
+                ")->execute([$admin_id, $nuevo_limite_empresas, $nuevo_limite_vehiculos, $nuevo_limite_choferes]);
+                
+                // Si es una petición AJAX, devolver JSON
+                if (isset($_POST['ajax']) && $_POST['ajax'] == 1) {
+                    while (ob_get_level() > 0) { ob_end_clean(); }
+                    header('Content-Type: application/json');
+                    echo json_encode([
+                        'success' => true,
+                        'mensaje' => 'Límites actualizados correctamente.',
+                        'admin_id' => $admin_id,
+                        'limite_empresas' => $nuevo_limite_empresas,
+                        'limite_vehiculos' => $nuevo_limite_vehiculos,
+                        'limite_choferes' => $nuevo_limite_choferes
+                    ]);
+                    exit;
+                }
+                
+                $mensaje = "Límites actualizados correctamente para el administrador.";
+            } catch (PDOException $e) {
+                if (isset($_POST['ajax']) && $_POST['ajax'] == 1) {
+                    while (ob_get_level() > 0) { ob_end_clean(); }
+                    header('Content-Type: application/json');
+                    echo json_encode([
+                        'success' => false,
+                        'error' => "Error al guardar límites: " . $e->getMessage()
+                    ]);
+                    exit;
+                }
+                $error = "Error al guardar límites: " . $e->getMessage();
+            }
+        }
+    }
+}
+
 // Procesar el guardado si viene por POST
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['tema'])) {
     $nuevoTema = $_POST['tema'];
@@ -170,6 +263,9 @@ if (isset($_GET['success'])) $mensaje = $_GET['msg'] ?? "Configuración actualiz
 <div class="tab-menu">
     <button class="tab-link active" onclick="openTab(event, 'tab-general')"><i class="fas fa-palette"></i> Apariencia</button>
     <button class="tab-link" onclick="openTab(event, 'tab-usuarios')"><i class="fas fa-users-cog"></i> Usuarios</button>
+    <?php if (($_SESSION['user_role'] ?? '') === 'developer'): ?>
+        <button class="tab-link" onclick="openTab(event, 'tab-limites')"><i class="fas fa-sliders-h"></i> Límites</button>
+    <?php endif; ?>
 </div>
 
 <div id="tab-general" class="tab-content active">
@@ -241,9 +337,9 @@ if (isset($_GET['success'])) $mensaje = $_GET['msg'] ?? "Configuración actualiz
                         <button onclick="abrirModalPassword(<?= $u['id'] ?>, '<?= htmlspecialchars($u['username']) ?>')" title="Cambiar Contraseña" style="background:none; border:none; color:var(--accent); cursor:pointer; margin-right:10px;">
                             <i class="fas fa-key"></i>
                         </button>
-                        <button onclick="abrirModalPermisos(<?= $u['id'] ?>, '<?= htmlspecialchars($u['username']) ?>', '<?= $u['permissions'] ?>')" title="Editar Permisos" style="background:none; border:none; color:#f39c12; cursor:pointer; margin-right:10px;">
+                        <a href="config_permisos_usuarios?user_id=<?= $u['id'] ?>" title="Editar Permisos" style="background:none; border:none; color:#f39c12; cursor:pointer; margin-right:10px; text-decoration:none;">
                             <i class="fas fa-user-lock"></i>
-                        </button>
+                        </a>
                         <?php if($u['id'] != $_SESSION['user_id']): ?>
                             <button onclick="confirmarEliminarUsuario(<?= $u['id'] ?>, '<?= $u['username'] ?>')" style="background:none; border:none; color:#e74c3c; cursor:pointer;">
                                 <i class="fas fa-trash-alt"></i>
@@ -259,6 +355,284 @@ if (isset($_GET['success'])) $mensaje = $_GET['msg'] ?? "Configuración actualiz
     </div>
 </div>
 </div>
+
+<?php if (($_SESSION['user_role'] ?? '') === 'developer'): ?>
+<div id="tab-limites" class="tab-content">
+<div class="card" style="margin-top: 20px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+        <h3><i class="fas fa-sliders-h"></i> Límites de Gestión por Administrador</h3>
+        <span class="badge" style="background:#e74c3c; color:#fff; font-size:0.8rem; padding:6px 12px;">
+            <i class="fas fa-lock"></i> Solo Developer
+        </span>
+    </div>
+    <p>Define los límites individuales para cada <strong>Administrador</strong> según el plan contratado. El valor <strong>0</strong> significa <em>sin límite</em>.</p>
+
+    <?php if (empty($admins_con_limites)): ?>
+        <div style="text-align:center; padding:30px; opacity:0.6;">
+            <i class="fas fa-users fa-3x" style="display:block; margin-bottom:10px;"></i>
+            No hay administradores registrados en el sistema.
+        </div>
+    <?php else: ?>
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Administrador</th>
+                        <th>Usuario</th>
+                        <th style="text-align:center;">Límite Empresas</th>
+                        <th style="text-align:center;">Límite Vehículos</th>
+                        <th style="text-align:center;">Límite Choferes</th>
+                        <th style="text-align:center;">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($admins_con_limites as $admin): 
+                        $tiene_limites = ((int)$admin['limite_empresas'] > 0 || (int)$admin['limite_vehiculos'] > 0 || (int)$admin['limite_choferes'] > 0);
+                    ?>
+                    <tr>
+                        <td><strong><?= htmlspecialchars($admin['full_name'] ?: $admin['username']) ?></strong></td>
+                        <td><?= htmlspecialchars($admin['username']) ?></td>
+                        <td style="text-align:center;">
+                            <?php if ((int)$admin['limite_empresas'] > 0): ?>
+                                <span class="badge" style="background:#3498db; color:#fff;"><?= (int)$admin['limite_empresas'] ?></span>
+                            <?php else: ?>
+                                <span style="opacity:0.4;">∞</span>
+                            <?php endif; ?>
+                        </td>
+                        <td style="text-align:center;">
+                            <?php if ((int)$admin['limite_vehiculos'] > 0): ?>
+                                <span class="badge" style="background:#e67e22; color:#fff;"><?= (int)$admin['limite_vehiculos'] ?></span>
+                            <?php else: ?>
+                                <span style="opacity:0.4;">∞</span>
+                            <?php endif; ?>
+                        </td>
+                        <td style="text-align:center;">
+                            <?php if ((int)$admin['limite_choferes'] > 0): ?>
+                                <span class="badge" style="background:#27ae60; color:#fff;"><?= (int)$admin['limite_choferes'] ?></span>
+                            <?php else: ?>
+                                <span style="opacity:0.4;">∞</span>
+                            <?php endif; ?>
+                        </td>
+                        <td style="text-align:center;">
+                            <button onclick="abrirModalLimites(<?= (int)$admin['id'] ?>, '<?= htmlspecialchars($admin['full_name'] ?: $admin['username'], ENT_QUOTES) ?>', <?= (int)$admin['limite_empresas'] ?>, <?= (int)$admin['limite_vehiculos'] ?>, <?= (int)$admin['limite_choferes'] ?>)" 
+                                    class="btn-primary btn-sm" style="background:<?= $tiene_limites ? '#e67e22' : '#3498db' ?>; border:none; padding:6px 12px; font-size:0.8rem; cursor:pointer;">
+                                <i class="fas fa-sliders-h"></i> <?= $tiene_limites ? 'Modificar' : 'Configurar' ?>
+                            </button>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    <?php endif; ?>
+</div>
+</div>
+
+<!-- Modal Límites por Admin -->
+<div id="modal-limites-admin" class="modal">
+    <div class="modal-content" style="max-width:500px;">
+        <div class="modal-header" style="background:linear-gradient(135deg, #e74c3c, #c0392b); color:#fff; padding:12px 16px; border-radius:10px 10px 0 0;">
+            <h3 style="margin:0; font-size:1.1rem;">
+                <i class="fas fa-sliders-h" style="margin-right:8px;"></i> Límites del Administrador
+            </h3>
+            <span class="close-modal" onclick="closeModal('modal-limites-admin')" style="color:#fff; font-size:1.2rem; cursor:pointer;">&times;</span>
+        </div>
+        <form method="POST">
+            <div class="modal-body" style="padding:16px;">
+                <input type="hidden" name="guardar_limites_admin" value="1">
+                <input type="hidden" name="admin_id" id="limites-admin-id">
+
+                <p style="margin-top:0; font-size:1.05rem;">
+                    Configurando límites para: <strong id="limites-admin-nombre"></strong>
+                </p>
+                <p style="font-size:0.85rem; color:#888; margin-bottom:16px;">
+                    Establecé en 0 si no querés límite para ese recurso.
+                </p>
+
+                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:15px; margin-bottom:16px;">
+                    <div class="form-group" style="margin:0; text-align:center;">
+                        <label style="font-weight:bold; display:block; margin-bottom:6px; font-size:0.9rem; color:#3498db;">
+                            <i class="fas fa-industry"></i> Empresas
+                        </label>
+                        <input type="number" min="0" step="1" name="limite_empresas" id="limites-empresas" class="input-field" style="width:100%; font-size:1.3rem; text-align:center;">
+                    </div>
+                    <div class="form-group" style="margin:0; text-align:center;">
+                        <label style="font-weight:bold; display:block; margin-bottom:6px; font-size:0.9rem; color:#e67e22;">
+                            <i class="fas fa-truck"></i> Vehículos
+                        </label>
+                        <input type="number" min="0" step="1" name="limite_vehiculos" id="limites-vehiculos" class="input-field" style="width:100%; font-size:1.3rem; text-align:center;">
+                    </div>
+                    <div class="form-group" style="margin:0; text-align:center;">
+                        <label style="font-weight:bold; display:block; margin-bottom:6px; font-size:0.9rem; color:#27ae60;">
+                            <i class="fas fa-users"></i> Choferes
+                        </label>
+                        <input type="number" min="0" step="1" name="limite_choferes" id="limites-choferes" class="input-field" style="width:100%; font-size:1.3rem; text-align:center;">
+                    </div>
+                </div>
+
+                <div style="background:#fef9e7; border-radius:8px; padding:12px; border:1px solid #f9e79f; font-size:0.85rem;">
+                    <i class="fas fa-info-circle" style="color:#f39c12;"></i>
+                    Los límites se aplican <strong>inmediatamente</strong>. Si un admin ya superó el nuevo límite, no podrá crear nuevas entidades hasta que se reduzca el conteo actual o se aumente el límite.
+                </div>
+            </div>
+            <div class="modal-footer" style="padding:14px 16px; display:flex; justify-content:space-between; gap:12px; border-top:1px solid #eee;">
+                <button type="button" class="btn-secondary" onclick="closeModal('modal-limites-admin')" style="padding:10px 18px;">Cancelar</button>
+                <button type="submit" class="btn-primary" style="background:#e74c3c; border:none; padding:10px 18px; display:inline-flex; align-items:center; gap:8px;">
+                    <i class="fas fa-save"></i> Guardar Límites
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function abrirModalLimites(adminId, adminNombre, limiteEmpresas, limiteVehiculos, limiteChoferes) {
+    document.getElementById('limites-admin-id').value = adminId;
+    document.getElementById('limites-admin-nombre').textContent = adminNombre;
+    document.getElementById('limites-empresas').value = limiteEmpresas;
+    document.getElementById('limites-vehiculos').value = limiteVehiculos;
+    document.getElementById('limites-choferes').value = limiteChoferes;
+    openModal('modal-limites-admin');
+}
+
+// Manejar el envío del formulario de límites por AJAX
+document.addEventListener('DOMContentLoaded', function() {
+    const formLimites = document.querySelector('#modal-limites-admin form');
+    if (formLimites) {
+        formLimites.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            formData.append('ajax', '1');
+            
+            const btnSubmit = this.querySelector('button[type="submit"]');
+            const originalText = btnSubmit.innerHTML;
+            btnSubmit.disabled = true;
+            btnSubmit.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Guardando...';
+            
+            fetch('', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Actualizar la tabla sin recargar
+                    actualizarFilaTabla(data);
+                    
+                    // Mostrar mensaje de éxito
+                    mostrarMensajeExito(data.mensaje);
+                    
+                    // Cerrar modal
+                    closeModal('modal-limites-admin');
+                } else {
+                    mostrarError(data.error);
+                }
+            })
+            .catch(error => {
+                mostrarError('Error de conexión: ' + error.message);
+            })
+            .finally(() => {
+                btnSubmit.disabled = false;
+                btnSubmit.innerHTML = originalText;
+            });
+        });
+    }
+});
+
+function actualizarFilaTabla(data) {
+    const adminId = data.admin_id;
+    // Buscar la fila que contiene el botón con este admin_id en el onclick
+    const fila = document.querySelector(`tr button[onclick*="abrirModalLimites(${adminId},"]`)?.closest('tr');
+    
+    if (!fila) {
+        // Si no se encontró, recargar la tabla entera (fallback)
+        location.reload();
+        return;
+    }
+    
+    // Actualizar celdas de límites por posición directa
+    const celdas = fila.querySelectorAll('td[style*="text-align:center"]');
+    
+    // celdas[0] = empresas, celdas[1] = vehiculos, celdas[2] = choferes, celdas[3] = acciones
+    
+    // Celda de empresas
+    if (celdas[0]) {
+        if (data.limite_empresas > 0) {
+            celdas[0].innerHTML = `<span class="badge" style="background:#3498db; color:#fff;">${data.limite_empresas}</span>`;
+        } else {
+            celdas[0].innerHTML = `<span style="opacity:0.4;">∞</span>`;
+        }
+    }
+    
+    // Celda de vehículos
+    if (celdas[1]) {
+        if (data.limite_vehiculos > 0) {
+            celdas[1].innerHTML = `<span class="badge" style="background:#e67e22; color:#fff;">${data.limite_vehiculos}</span>`;
+        } else {
+            celdas[1].innerHTML = `<span style="opacity:0.4;">∞</span>`;
+        }
+    }
+    
+    // Celda de choferes
+    if (celdas[2]) {
+        if (data.limite_choferes > 0) {
+            celdas[2].innerHTML = `<span class="badge" style="background:#27ae60; color:#fff;">${data.limite_choferes}</span>`;
+        } else {
+            celdas[2].innerHTML = `<span style="opacity:0.4;">∞</span>`;
+        }
+    }
+    
+    // Actualizar botón de acción (celdas[3] o buscarlo directamente)
+    const btnAccion = fila.querySelector('button[onclick*="abrirModalLimites"]');
+    if (btnAccion) {
+        const tieneLimites = data.limite_empresas > 0 || data.limite_vehiculos > 0 || data.limite_choferes > 0;
+        btnAccion.style.background = tieneLimites ? '#e67e22' : '#3498db';
+        btnAccion.innerHTML = `<i class="fas fa-sliders-h"></i> ${tieneLimites ? 'Modificar' : 'Configurar'}`;
+    }
+}
+
+function mostrarMensajeExito(mensaje) {
+    // Remover mensajes anteriores
+    const mensajesAnteriores = document.querySelectorAll('.alert-success, .alert-exito');
+    mensajesAnteriores.forEach(el => el.remove());
+    
+    const divMensaje = document.createElement('div');
+    divMensaje.className = 'alert-success';
+    divMensaje.style.cssText = 'background: #d4edda; color: #155724; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #c3e6cb; position: fixed; top: 20px; right: 20px; z-index: 9999; min-width: 300px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);';
+    divMensaje.innerHTML = `<i class="fas fa-check-circle"></i> ${mensaje}`;
+    
+    document.body.appendChild(divMensaje);
+    
+    // Ocultar después de 3 segundos
+    setTimeout(() => {
+        divMensaje.style.transition = 'opacity 0.5s';
+        divMensaje.style.opacity = '0';
+        setTimeout(() => divMensaje.remove(), 500);
+    }, 3000);
+}
+
+function mostrarError(mensaje) {
+    // Remover errores anteriores
+    const erroresAnteriores = document.querySelectorAll('.alert-error');
+    erroresAnteriores.forEach(el => el.remove());
+    
+    const divError = document.createElement('div');
+    divError.className = 'alert-error';
+    divError.style.cssText = 'background: #f8d7da; color: #721c24; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #f5c6cb; position: fixed; top: 20px; right: 20px; z-index: 9999; min-width: 300px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);';
+    divError.innerHTML = `<i class="fas fa-exclamation-triangle"></i> ${mensaje}`;
+    
+    document.body.appendChild(divError);
+    
+    // Ocultar después de 4 segundos
+    setTimeout(() => {
+        divError.style.transition = 'opacity 0.5s';
+        divError.style.opacity = '0';
+        setTimeout(() => divError.remove(), 500);
+    }, 4000);
+}
+</script>
+<?php endif; ?>
 
 <!-- Modal Nuevo Usuario -->
 <div id="modal-usuario" class="modal">
@@ -332,8 +706,10 @@ if (isset($_GET['success'])) $mensaje = $_GET['msg'] ?? "Configuración actualiz
                         'choferes_liquidar' => 'Liquidar Choferes', 'cobranzas' => 'Cobranzas',
                         'comisionistas' => 'Comisionistas', 'comisionistas_ctacte' => 'Cta Cte Comisiones', 'vehiculos' => 'Vehículos',
                         'clientes' => 'Clientes', 'mantenimiento' => 'Mantenimiento',
-                        'tesoreria' => 'Tesorería', 'empresas' => 'Empresas',
-                        'configuracion' => 'Configuración'
+                        'tesoreria' => 'Tesorería', 'cuentas' => 'Cuentas',
+                        'empresas' => 'Empresas', 'configuracion' => 'Configuración',
+                        'config_permisos_usuarios' => 'Permisos Usuarios', 'auditoria' => 'Auditoría',
+                        'importar_carta_porte' => 'Importar Carta Porte PDF'
                     ];
                     foreach ($modulos_lista as $key => $label): ?>
                         <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">

@@ -28,6 +28,11 @@
 }
 
 /* UX: reducir tamaño de modales de cobranzas (cobranzas/liquidaciones) */
+#modal-cobro .modal-content {
+  max-width: 750px !important;
+  width: 95% !important;
+}
+
 #modal-liquidacion .modal-content,
 #modal-editar-viaje-liq .modal-content,
 #modal-editar-viaje .modal-content { /* Agregado para editar viaje */
@@ -44,6 +49,82 @@
 #modal-factura .modal-content {
   max-width: 760px !important;
   width: 90% !important;
+}
+
+/* ─── MODAL NUEVO/EDITAR VIAJE ──────────────────────── */
+#modal-viaje-content {
+  max-width: 620px !important;
+  width: 92% !important;
+  font-size: 0.875rem;
+}
+
+#modal-viaje-header {
+  background: linear-gradient(135deg, #2c3e50, #34495e) !important;
+  color: #fff !important;
+  padding: 10px 14px !important;
+  border-radius: 10px 10px 0 0 !important;
+}
+
+#modal-viaje-body {
+  padding: 14px 16px !important;
+}
+
+#modal-viaje-body .form-group {
+  margin-bottom: 8px;
+}
+
+#modal-viaje-body label {
+  font-size: 0.8rem;
+  margin-bottom: 4px;
+  opacity: 0.85;
+  font-weight: 600;
+}
+
+#modal-viaje-body .input-field {
+  padding: 7px 10px;
+  font-size: 0.85rem;
+}
+
+#modal-viaje-footer {
+  padding: 10px 16px !important;
+}
+
+#modal-viaje-footer .btn-primary,
+#modal-viaje-footer .btn-secondary {
+  padding: 7px 14px;
+  font-size: 0.85rem;
+}
+
+.viaje-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.viaje-grid-3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.req {
+  color: #e74c3c;
+  font-weight: bold;
+}
+
+/* Responsive: apilar en mobile */
+@media (max-width: 768px) {
+  #modal-viaje-content {
+    max-width: 98% !important;
+    width: 98% !important;
+  }
+  .viaje-grid-2,
+  .viaje-grid-3 {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
 }
 
 /* Distribución interna Modal Factura (opción B) */

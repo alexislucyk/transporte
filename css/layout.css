@@ -1,7 +1,3 @@
-:root {
-  --min-viewport-width: 1366px;
-  --min-viewport-height: 768px;
-}
 
 /* UX: reducir tipografía ~15% (sin tocar spacing) */
 html { font-size: 85%; }

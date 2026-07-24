@@ -1,0 +1,176 @@
+/* ─── VIAJES: Estilos Responsive ──────────────────────── */
+
+/* Page header responsive */
+#viajes-page {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* Filter card responsive */
+.viajes-filter-card {
+  margin-bottom: 20px;
+  position: relative;
+  overflow: hidden;
+}
+
+.viajes-filter-form {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* Table responsive: allow wrapping on small screens */
+.viajes-table td,
+.viajes-table th {
+  white-space: nowrap;
+}
+
+/* Responsive table: hide less important columns on small screens */
+@media (max-width: 1200px) {
+  .viajes-table th:nth-child(5),
+  .viajes-table td:nth-child(5) {
+    display: none;
+  }
+}
+
+@media (max-width: 1024px) {
+  .viajes-table th:nth-child(4),
+  .viajes-table td:nth-child(4) {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .viajes-table th:nth-child(3),
+  .viajes-table td:nth-child(3) {
+    display: none;
+  }
+
+  .viajes-table th:nth-child(6),
+  .viajes-table td:nth-child(6) {
+    display: none;
+  }
+
+  .viajes-table th:nth-child(7),
+  .viajes-table td:nth-child(7) {
+    display: none;
+  }
+
+  /* Show only: Fecha, CTG/CP, Acciones */
+  .viajes-table th:nth-child(1),
+  .viajes-table td:nth-child(1),
+  .viajes-table th:nth-child(2),
+  .viajes-table td:nth-child(2),
+  .viajes-table th:nth-child(8),
+  .viajes-table td:nth-child(8) {
+    display: table-cell;
+  }
+}
+
+/* Main content padding responsive */
+@media (max-width: 1024px) {
+  .main-content {
+    padding: 20px !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .main-content {
+    padding: 12px !important;
+  }
+}
+
+/* Sidebar: on very small screens, always collapsed */
+@media (max-width: 768px) {
+  body:not(.collapsed) {
+    --sidebar-width: 70px;
+  }
+  body:not(.collapsed) .sidebar-brand span,
+  body:not(.collapsed) .company-selector,
+  body:not(.collapsed) .nav-item span,
+  body:not(.collapsed) .sidebar-footer strong {
+    display: none;
+  }
+  body:not(.collapsed) .nav-item {
+    justify-content: center;
+    padding: 12px 0;
+    border-left: none;
+  }
+  body:not(.collapsed) .sidebar-logo {
+    margin-right: 0;
+  }
+  body:not(.collapsed) .nav-item.active {
+    border-left: 4px solid var(--accent);
+  }
+  body:not(.collapsed) .nav-item i {
+    margin-right: 0;
+    font-size: 1.2rem;
+  }
+  body:not(.collapsed) .sidebar-brand {
+    justify-content: center;
+  }
+}
+
+/* Card padding responsive */
+@media (max-width: 768px) {
+  .card {
+    padding: 12px !important;
+  }
+}
+
+/* Page header title area responsive */
+@media (max-width: 768px) {
+  #viajes-page h1 {
+    font-size: 1.3rem;
+  }
+  #viajes-page p {
+    font-size: 0.85rem;
+  }
+}
+
+/* Filter select responsive */
+@media (max-width: 768px) {
+  .viajes-filter-form select {
+    max-width: 100% !important;
+    width: 100%;
+  }
+  .viajes-filter-form label {
+    width: 100%;
+  }
+}
+
+/* Modal footer responsive: stack buttons on small screens */
+@media (max-width: 600px) {
+  #modal-viaje-footer {
+    flex-direction: column;
+    align-items: stretch !important;
+  }
+  #modal-viaje-footer > div:first-child {
+    flex-direction: column;
+    align-items: stretch !important;
+  }
+  #modal-viaje-footer > div:last-child {
+    justify-content: stretch !important;
+  }
+  #modal-viaje-footer .btn-primary,
+  #modal-viaje-footer .btn-secondary {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+/* PDF import area responsive */
+@media (max-width: 600px) {
+  #modal-viaje-footer > div:first-child > div {
+    width: 100%;
+    box-sizing: border-box;
+  }
+  #modal-viaje-footer label {
+    font-size: 0.8rem;
+  }
+}

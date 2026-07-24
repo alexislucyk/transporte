@@ -1,10 +1,19 @@
 <?php
-define('DB_HOST', getenv('DB_HOST') ?: 'db');
-define('DB_NAME', getenv('DB_NAME') ?: 'trans_dev_db');
-define('DB_USER', getenv('DB_USER') ?: 'root');
-define('DB_PASS', getenv('DB_PASS') ?: (isset($_ENV['DB_PASS']) ? (string)$_ENV['DB_PASS'] : '') ?: 'isidoro9');
+// DB config centralizada para Trans Cargo Hub.
+// Lee credenciales desde .env con fallbacks seguros.
 
+function env_or_constant(string $key, string $fallback): string {
+    $val = getenv($key);
+    if ($val !== false && $val !== '') {
+        return $val;
+    }
+    return isset($_ENV[$key]) && $_ENV[$key] !== '' ? (string)$_ENV[$key] : $fallback;
+}
 
+define('DB_HOST', env_or_constant('DB_HOST', 'db'));
+define('DB_NAME', env_or_constant('DB_NAME', 'trans_dev_db'));
+define('DB_USER', env_or_constant('DB_USER', 'root'));
+define('DB_PASS', env_or_constant('DB_PASS', ''));
 
 try {
     $pdo = new PDO(
@@ -17,5 +26,9 @@ try {
         ]
     );
 } catch (PDOException $e) {
-    die("Error de conexión: " . $e->getMessage());
+    // Log interno con detalles (nunca expuesto al cliente)
+    error_log("[DB CONNECTION ERROR] " . $e->getMessage() . " | DB: " . DB_NAME . " | User: " . DB_USER);
+    // Mensaje genérico al usuario
+    die("Error: No se pudo conectar a la base de datos. Contacte al administrador del sistema.");
 }
+

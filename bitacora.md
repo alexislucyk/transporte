@@ -422,7 +422,6 @@ function XOwner(PDO $pdo, int $id, int $tenantId, string $role): bool { ... }
 
 - ✅ `php -l` sin errores de sintaxis en ambos archivos.
 - ✅ Lint passed: `No syntax errors detected`.
-```
 
 ---
 
@@ -500,6 +499,7 @@ El archivo `modules/viajes.php` existía con estructura parcial (~508 líneas) p
 ## 12. Implementación de `viajes_detalle.php` — Vista de Detalle (2026-06-26)
 
 ### 12.1 Estado inicial
+
 El archivo `modules/viajes_detalle.php` existía pero estaba **completamente vacío** (0 líneas). Sin implementación alguna.
 
 ### 12.2 Funcionalidad implementada
@@ -556,3 +556,390 @@ El archivo `modules/viajes_detalle.php` existía pero estaba **completamente vac
 - ✅ Impacto contable: adelantos se reflejan automáticamente en cuenta corriente del chofer.
 - ✅ Gastos categorizados: 5 categorías + filtro por pagado_por (empresa/adelanto/descuento_flete).
 - ✅ UI responsiva con grids adaptables, badges de colores y modales específicos.
+
+---
+
+## 13. Implementación del Sistema de Auditoría (2026-10-07)
+
+### 13.1 Migración SQL — `migrations/012_audit_log.sql`
+
+**Objetivo:** Crear sistema de registro de auditoría para tracking de todas las acciones realizadas por usuarios y administradores.
+
+**Cambios:**
+- Tabla `audit_log` con columnas:
+  - `id` (PK auto-increment)
+  - `user_id` (FK a users.id, nullable)
+  - `username` (varchar 50)
+  - `user_role` (enum: admin, user, developer)
+  - `accion` (varchar 100) — tipo de acción (crear, editar, eliminar, login, logout, etc.)
+  - `modulo` (varchar 50) — módulo donde ocurrió la acción
+  - `descripcion` (text) — descripción detallada
+  - `datos_anteriores` (json) — estado antes del cambio (para updates)
+  - `datos_nuevos` (json) — estado después del cambio (para updates)
+  - `ip_address` (varchar 45) — IP del usuario
+  - `user_agent` (varchar 255) — browser info
+  - `created_at` (timestamp) — fecha/hora del evento
+- Índices para performance:
+  - `user_id` — búsquedas por usuario
+  - `accion` — filtrado por tipo de acción
+  - `modulo` — filtrado por módulo
+  - `created_at` — ordenamiento temporal
+  - `idx_user_fecha` — búsquedas compuestas por usuario y fecha
+
+**SQL completo:** ver `migrations/012_audit_log.sql`.
+
+### 13.2 Helper global — `core/helpers.php` → `registrarAuditoria()`
+
+**Función:** `registrarAuditoria(PDO $pdo, ?int $userId, string $accion, string $modulo, string $descripcion, ?array $datosAnteriores = null, ?array $datosNuevos = null): bool`
+
+**Características:**
+- **Auto-obtención de contexto**: Si no se proporciona `$userId`, lo obtiene de `$_SESSION['user_id']`.
+- **Captura automática**: username, rol, IP y User Agent desde sesión y servidor.
+- **Truncamiento de User Agent**: Limita a 255 caracteres para evitar errores.
+- **JSON encoding**: Usa `JSON_UNESCAPED_UNICODE` para preservar caracteres especiales.
+- **Manejo de errores**: Captura excepciones PDO y las loguea sin interrumpir el flujo.
+- **Retorno booleano**: Permite verificar éxito/fallo sin try-catch en el llamador.
+
+**Uso típico:**
+```php
+// Acción simple (crear, login, logout)
+registrarAuditoria($pdo, $userId, 'crear', 'clientes', 'Cliente creado: Juan Pérez');
+
+// Acción con cambios (editar, borrar)
+registrarAuditoria($pdo, $userId, 'editar', 'empresas', 'Empresa actualizada', 
+    ['razon_social' => 'Old Name'], 
+    ['razon_social' => 'New Name']
+);
+```
+
+### 13.3 Módulo `modules/auditoria.php` (414 líneas)
+
+**Objetivo:** Interfaz de visualización de registros de auditoría (solo para desarrolladores).
+
+**Características:**
+
+1. **Acceso restringido:** Solo usuarios con rol `developer` pueden acceder. Cualquier otro rol recibe `die()` inmediatamente.
+
+2. **Filtros de búsqueda avanzados:**
+   - Por usuario (username o ID)
+   - Por módulo (select con valores únicos de la DB)
+   - Por acción (select con valores únicos de la DB)
+   - Por rango de fechas (desde/hasta)
+
+3. **Estadísticas en tiempo real:**
+   - Cantidad de registros encontrados (según filtros)
+   - Total de registros en el sistema
+   - Cantidad de usuarios con actividad
+
+4. **Tabla de registros:**
+   - Columnas: ID, Fecha/Hora, Usuario, Rol, Acción, Módulo, Descripción, IP, Detalles
+   - Badges de color por rol (developer=violeta, admin=azul, user=gris)
+   - Badges de color por acción (crear=verde, editar=naranja, eliminar=rojo, login=azul, logout=gris)
+   - Formato de fecha: `d/m/Y H:i:s`
+   - Truncamiento inteligente de descripciones largas
+
+5. **Modal de detalles:**
+   - Botón "Ver detalles" solo aparece si hay `datos_anteriores` o `datos_nuevos`
+   - Muestra información técnica sobre cómo consultar los JSON en la DB
+   - Mensaje informativo sobre la estructura de datos
+
+6. **Paginación implícita:** LIMIT 500 registros por defecto para performance.
+
+### 13.4 Integración en archivos existentes
+
+**`login.php`:**
+- **Login exitoso** (línea 48-52): Registra auditoría con acción `login`, módulo `auth`, descripción "Inicio de sesión exitoso" y datos de contexto (username, role).
+- **Login fallido** (línea 59-63): Registra auditoría con acción `login_fallido`, módulo `auth`, descripción con username intentado e IP.
+
+**`index.php`:**
+- **Logout** (línea 39): Registra auditoría con acción `logout`, módulo `auth`, descripción "Cierre de sesión del usuario".
+- **Cambio de empresa** (líneas 109-113): Registra auditoría con acción `cambiar_empresa`, módulo `empresas`, descripción con nombres de empresas anterior y nueva, incluyendo datos anteriores y nuevos (IDs y nombres).
+
+**`includes/sidebar.php`:**
+- **Navegación** (líneas 63-66): Item "Auditoría" visible solo para rol `developer` con ícono `fa-clipboard-list`.
+
+**`index.php` (routing):**
+- **Case agregado** (línea 276): `case 'auditoria': include_once 'modules/auditoria.php';`.
+
+### 13.5 Verificación
+
+- ✅ `php -l` sin errores de sintaxis en `modules/auditoria.php`.
+- ✅ Lint passed: `No syntax errors detected in modules/auditoria.php`.
+- ✅ Acceso restringido a developer implementado.
+- ✅ Filtros funcionales con valores únicos dinámicos desde la DB.
+- ✅ Estadísticas calculadas en tiempo real.
+- ✅ Integración completa en login, logout y cambio de empresa.
+- ✅ Navegación condicional por rol en sidebar.
+
+---
+
+## 14. Estado del Roadmap (actualizado 2026-10-07)
+
+| Módulo | Estado |
+|--------|--------|
+| clientes.php | ✅ Completo |
+| vehiculos.php | ✅ Completo |
+| mantenimiento.php | ✅ Completo |
+| choferes.php | ✅ Completo |
+| comisionistas.php | ✅ Completo |
+| comisionistas_ctacte.php | ✅ Completo |
+| choferes_ctacte.php | ✅ Completo |
+| choferes_liquidar.php | ✅ Completo |
+| viajes.php | ✅ Completo |
+| viajes_detalle.php | ✅ Completo |
+| **auditoria.php** | ✅ **Completo (414 líneas)** |
+| **cobranzas.php** | ✅ **Completo (270 líneas)** |
+| **cobranzas_fletes_pendientes.php** | ✅ **Completo (136 líneas)** |
+| **cobranzas_fletes_liquidar.php** | ✅ **Completo (910 líneas)** |
+| **cobranzas_fletes_factura.php** | ✅ **Completo (361 líneas)** |
+| **cuentas.php** | ✅ **Completo (783 líneas)** |
+
+---
+
+## 15. Implementación del Sistema de Cobranzas (2026-10-07)
+
+### 15.1 Módulo `modules/cobranzas.php` (270 líneas)
+
+**Objetivo:** Módulo principal de gestión de cobranzas, punto de entrada al flujo de facturación y cobro.
+
+**Funcionalidad:**
+1. **Dos listados principales:**
+   - Viajes descargados (pendientes de facturar)
+   - Viajes facturados (pendientes de cobrar)
+
+2. **Acciones:**
+   - **Facturar**: Cambia estado de `descargado` → `facturado` (con número de factura y fecha)
+   - **Cobrar**: Redirige a `cobranzas_fletes_liquidar` con el ID del viaje para registrar el cobro
+
+3. **Multi-tenant estricto:** Todas las queries filtran por `transportista_id = $_SESSION['active_company_id']` y `activo = 1`.
+
+4. **Navegación:** Botones de acceso rápido a:
+   - `cobranzas_fletes_pendientes` — Ver fletes pendientes de facturar
+   - `cobranzas_fletes_liquidar` — Ver fletes a cobrar y liquidar
+
+### 15.2 Módulo `modules/cobranzas_fletes_pendientes.php` (136 líneas)
+
+**Objetivo:** Listado de viajes descargados pendientes de facturar.
+
+**Características:**
+1. **Query principal:** Viajes en estado `descargado` con JOIN a clientes, choferes, vehículos y pagadores.
+2. **Columnas mostradas:**
+   - CTG / Documento
+   - Cliente
+   - Origen → Destino
+   - Patente (vehículo)
+   - TN Descargadas
+   - Monto a Facturar
+3. **Acciones por fila:**
+   - **Ver Detalle**: Link a `viajes_detalle?viaje_id=X` (solo consulta)
+   - **Facturar**: Link a `cobranzas_fletes_factura?viaje_id=X`
+4. **Totales:** Footer con suma total de montos a facturar.
+5. **Badge informativo:** Muestra cantidad de pendientes.
+
+### 15.3 Módulo `modules/cobranzas_fletes_factura.php` (361 líneas)
+
+**Objetivo:** Pantalla de facturación de un viaje descargado.
+
+**Características:**
+1. **Validación:** Solo permite facturar viajes en estado `descargado`. Si ya está facturado/cobrado/liquidado, muestra mensaje informativo.
+2. **Datos del viaje:** Muestra cliente, CUIT, producto, pagador, origen-destino, tarifa x TN, TN descargadas, patente y chofer.
+3. **Cálculos de factura:**
+   - Total Neto (base imponible)
+   - IVA 21% calculado automáticamente
+   - Total Final (neto + IVA)
+4. **Formulario de facturación:**
+   - Número de factura (obligatorio)
+   - Fecha de emisión (default hoy)
+   - Fecha de cobro estimada (opcional)
+5. **Confirmación:** Al enviar, actualiza `factura_nro`, `factura_fecha`, `fecha_cobro` y cambia estado a `facturado`.
+6. **Post-facturación:** Muestra datos de la factura emitida con badge "Facturado".
+
+### 15.4 Módulo `modules/cobranzas_fletes_liquidar.php` (910 líneas)
+
+**Objetivo:** Gestión completa de cobros y liquidación de choferes.
+
+**Funcionalidad principal:**
+
+**a) Procesar cobro:**
+- **Validaciones:** Viaje debe estar en estado `facturado`, cuenta destino debe existir y pertenecer al tenant.
+- **Datos del cobro:**
+  - Cuenta de caja destino (de `cuentas_empresa`)
+  - Monto total facturado
+  - Medio de pago (efectivo, transferencia, cheque, Mercado Pago, otro)
+  - Retenciones detalladas (IVA, Ganancias, IIBB, SUSS, Otro) — múltiples filas dinámicas
+  - Datos del cheque (si aplica): tipo, banco, número, fechas, librador, endosante, importe
+  - Observaciones
+- **Cálculo automático:** Neto a cobrar = Total facturado - Total retenciones
+- **Impacto contable:**
+  - Inserta registro en `cobros_fletes`
+  - Inserta retenciones en `cobros_fletes_retenciones`
+  - Inserta datos de cheque en `cobros_fletes_cheques` (si aplica)
+  - Actualiza `saldo_actual` en `cuentas_empresa`
+  - Inserta movimiento en `cuentas_movimientos` (tipo `entrada`, referencia `cobro_flete`)
+  - Marca viaje como `cobrado` con `fecha_cobro`
+
+**b) Procesar liquidación:**
+- **Validaciones:** Viaje debe estar en estado `cobrado` y tener chofer asignado.
+- **Cálculo:** Ganancia del chofer = `total_flete_neto * chofer_porcentaje / 100`
+- **Impacto contable:**
+  - Inserta pago en `chofer_pagos` con tipo `liquidacion`
+  - Marca viaje como `liquidado` con `acreditado_chofer = 1`
+
+**c) Tres secciones de listados:**
+1. **Viajes Facturados (Por Cobrar):** Muestra neto, total facturado (con IVA 21%), fecha de emisión. Botón "Cobrar" abre modal.
+2. **Viajes Cobrados (Por Liquidar):** Muestra neto cobrado, fecha de cobro, medio de pago, cuenta destino.
+3. **Viajes Liquidados (Historial):** Últimos 20 viajes liquidados con ganancia del chofer.
+
+**d) Modal de cobro:**
+- Formulario completo con cuenta destino, fecha, medio de pago
+- Campos dinámicos de retenciones (agregar/eliminar filas)
+- Cálculo en tiempo real del neto a cobrar
+- Resumen visual: Total facturado, retenciones, neto final
+- Auto-apertura si viene de redirección con `?cobrar_viaje_id=X`
+
+### 15.5 Integración en archivos existentes
+
+**`index.php`:**
+- Agregado `case 'cobranzas': include_once 'modules/cobranzas.php';`
+- Agregado `case 'cobranzas_fletes_pendientes': include_once 'modules/cobranzas_fletes_pendientes.php';`
+- Agregado `case 'cobranzas_fletes_liquidar': include_once 'modules/cobranzas_fletes_liquidar.php';`
+- Agregado `case 'cobranzas_fletes_factura': include_once 'modules/cobranzas_fletes_factura.php';`
+
+**`includes/sidebar.php`:**
+- Agregado `navItem('cobranzas', 'fa-hand-holding-usd', 'Cobranzas', ...)` en menú principal.
+
+**`modules/configuracion.php`:**
+- Agregado permiso `'cobranzas' => 'Cobranzas'`
+- Agregado permiso `'cobranzas_fletes_pendientes' => 'Fletes Pendientes'`
+- Agregado permiso `'cobranzas_fletes_liquidar' => 'Fletes a Cobrar'`
+- Agregado permiso `'cobranzas_fletes_factura' => 'Facturación de Fletes'`
+
+### 15.6 Flujo completo de cobranzas
+
+```
+Viaje en estado 'descargado'
+    ↓
+cobranzas_fletes_pendientes (listar pendientes)
+    ↓
+cobranzas_fletes_factura (facturar: descargado → facturado)
+    ↓
+cobranzas_fletes_liquidar (listar facturados)
+    ↓
+Registrar cobro (facturado → cobrado)
+    - Inserta en cobros_fletes
+    - Actualiza saldo de cuenta
+    - Registra movimiento en cuentas_movimientos
+    ↓
+Registrar liquidación (cobrado → liquidado)
+    - Calcula ganancia chofer
+    - Inserta pago en chofer_pagos
+```
+
+### 15.7 Verificación
+
+- ✅ `php -l` sin errores de sintaxis en los 4 archivos.
+- ✅ Lint passed en todos los módulos de cobranzas.
+- ✅ Multi-tenant 100% aislado (todas las queries filtran por `transportista_id`).
+- ✅ Validación de ownership en todas las operaciones.
+- ✅ Transacciones BD para garantizar integridad en cobros y liquidaciones.
+- ✅ Cálculo automático de IVA, retenciones y neto a cobrar.
+- ✅ Impacto contable completo en cuentas_empresa y cuentas_movimientos.
+
+---
+
+## 16. Próximos pasos — Roadmap actualizado
+
+Módulos pendientes de implementación:
+
+1. **`tesoreria.php`** — Cuentas financieras y medios de cobro (gestión de `cuentas_empresa`)
+
+---
+
+## 16. Implementación de `cuentas.php` — Gestión de Cuentas Financieras (2026-10-07)
+
+### 16.1 Módulo `modules/cuentas.php` (783 líneas)
+
+**Objetivo:** Reemplaza a `tesoreria.php`. Gestiona las cuentas financieras de la empresa (bancos, billeteras virtuales, caja de efectivo) donde se ingresan los pagos de fletes.
+
+**Funcionalidad:**
+
+**a) CRUD de cuentas:**
+- **Crear cuenta**: Nombre, tipo (banco/billetera_virtual/caja_efectivo/otro), banco/entidad, número de cuenta, CBU, alias, titular, CUIT titular, saldo inicial.
+- **Editar cuenta**: Actualiza datos de la cuenta (excepto saldo_actual).
+- **Eliminar cuenta**: Borrado lógico (`activo = 0`).
+- **Ajustar saldo**: Permite modificar manualmente el saldo actual de una cuenta.
+
+**b) Agrupación por tipo:**
+- Cuentas agrupadas en secciones: Bancos, Billeteras Virtuales, Caja de Efectivo, Otras Cuentas.
+- Badges de color por tipo.
+- Subtotales por tipo y total general consolidado.
+
+**c) Visualización de movimientos (AJAX):**
+- Botón "Ver movimientos" por cuenta.
+- Modal con tabla de movimientos obtenidos vía AJAX desde `cuentas?ajax_movimientos=1&cuenta_id=X`.
+- Movimientos incluyen: fecha, tipo (entrada/salida), concepto, referencia (CTG/CP/Viaje), monto, saldo resultante, observaciones.
+- Totales de entradas y salidas calculados en el frontend.
+- Referencias a cobros de fletes muestran el documento del viaje (CTG/CP/Otros).
+
+**d) Multi-tenant estricto:**
+- Todas las queries filtran por `transportista_id = $_SESSION['active_company_id']` y `activo = 1`.
+- Validación de ownership en todas las operaciones (crear, editar, eliminar, ajustar saldo, ver movimientos).
+
+**e) Integración contable:**
+- Las cuentas se usan como destino en los cobros de fletes (`cobranzas_fletes_liquidar.php`).
+- Los movimientos se registran automáticamente en `cuentas_movimientos` al registrar un cobro.
+- El saldo de la cuenta se actualiza automáticamente al registrar cobros.
+
+### 16.2 Integración en archivos existentes
+
+**`index.php`:**
+- Agregado `case 'cuentas': include_once 'modules/cuentas.php';` en el switch de routing.
+
+**`includes/sidebar.php`:**
+- Agregado `navItem('cuentas', 'fa-wallet', 'Cuentas', ...)` en menú principal.
+
+**`modules/configuracion.php`:**
+- Agregado permiso `'cuentas' => 'Cuentas'` a la lista de permisos.
+
+**`modules/cobranzas_fletes_liquidar.php`:**
+- Usa `cuentas.php` como fuente de cuentas destino para registrar cobros.
+- Query: `SELECT id, nombre, tipo, banco, saldo_actual FROM cuentas_empresa WHERE transportista_id = ? AND activo = 1`.
+
+### 16.3 Verificación
+
+- ✅ `php -l` sin errores de sintaxis en `modules/cuentas.php`.
+- ✅ Lint passed: `No syntax errors detected in modules/cuentas.php`.
+- ✅ Multi-tenant 100% aislado (todas las queries filtran por `transportista_id`).
+- ✅ CRUD completo con validación de ownership.
+- ✅ AJAX endpoint para movimientos de cuenta.
+- ✅ Agrupación visual por tipo de cuenta con badges y subtotales.
+- ✅ Integración completa con sistema de cobranzas.
+
+---
+
+## 17. Próximos pasos — Roadmap final
+
+**Módulos pendientes de implementación:**
+
+Ninguno. Todos los módulos planificados están completados.
+
+**Módulos implementados (completos):**
+
+1. ✅ `clientes.php` — Gestión de clientes (281 líneas)
+2. ✅ `vehiculos.php` — Gestión de flota (244 líneas)
+3. ✅ `mantenimiento.php` — Mantenimiento de vehículos (231 líneas)
+4. ✅ `choferes.php` — Gestión de choferes (248 líneas)
+5. ✅ `comisionistas.php` — Gestión de comisionistas (279 líneas)
+6. ✅ `choferes_ctacte.php` — Cuenta corriente choferes (188 líneas)
+7. ✅ `choferes_liquidar.php` — Liquidación choferes (215 líneas)
+8. ✅ `comisionistas_ctacte.php` — Cuenta corriente comisionistas (175 líneas)
+9. ✅ `viajes.php` — Operativa de viajes (633 líneas)
+10. ✅ `viajes_detalle.php` — Detalle de viaje (532 líneas)
+11. ✅ `cobranzas.php` — Gestión de cobranzas (270 líneas)
+12. ✅ `cobranzas_fletes_pendientes.php` — Fletes pendientes (136 líneas)
+13. ✅ `cobranzas_fletes_factura.php` — Facturación de fletes (361 líneas)
+14. ✅ `cobranzas_fletes_liquidar.php` — Cobros y liquidación (910 líneas)
+15. ✅ `cuentas.php` — Cuentas financieras (783 líneas)
+16. ✅ `auditoria.php` — Registro de auditoría (414 líneas)
+
+**Nota:** El sistema está completamente funcional con el flujo completo: Clientes → Viajes → Descargar → Facturar → Cobrar → Liquidar. Todos los módulos registran automáticamente eventos en el sistema de auditoría (login, logout, cambio de empresa). Para agregar auditoría a operaciones específicas de cada módulo, se debe llamar a `registrarAuditoria()` en los puntos de acción (crear, editar, eliminar).

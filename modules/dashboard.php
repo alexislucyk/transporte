@@ -23,12 +23,12 @@ $v_liq = $pdo->prepare("SELECT COUNT(*) FROM viajes WHERE transportista_id = ? A
 $v_liq->execute([$active_company_id]);
 $count_por_liquidar = $v_liq->fetchColumn();
 
-// 5. Monto total de Cuentas por Cobrar (base.md §5: "monto total de fletes pendientes de cobro")
+// 5. Monto total de Cuentas por Cobrar
 $monto_cxc = $pdo->prepare("SELECT COALESCE(SUM(total_flete_neto), 0) FROM viajes WHERE transportista_id = ? AND estado = 'facturado' AND activo = 1");
 $monto_cxc->execute([$active_company_id]);
 $total_cxc = $monto_cxc->fetchColumn();
 
-// 6. Viajes realizados en el mes y semana en curso (base.md §5: "Métricas Rápidas")
+// 6. Viajes realizados en el mes y semana en curso
 $viajes_mes = $pdo->prepare("SELECT COUNT(*) FROM viajes WHERE transportista_id = ? AND MONTH(fecha_carga) = MONTH(CURDATE()) AND YEAR(fecha_carga) = YEAR(CURDATE()) AND activo = 1");
 $viajes_mes->execute([$active_company_id]);
 $count_viajes_mes = $viajes_mes->fetchColumn();
@@ -51,10 +51,7 @@ $stmt = $pdo->prepare("SELECT id, fecha_carga as fecha, origen, destino, estado,
 $stmt->execute([$active_company_id]);
 $ultimos_movs = $stmt->fetchAll();
 
-// --- AGENDA DE PAGOS (base.md §5) ---
-// Próximos pagos estimados/pactados: viajes facturados sin cobro efectivo ordenado por fecha de factura
-// base.md §3 ESTADO 3: "Fecha de Pago" se registra al cobrar, por lo que usamos fecha_factura
-// como proxy de "pactado" (es la fecha en que se emitió la factura pendiente de cobro)
+// --- AGENDA DE PAGOS ---
 $stmt_agenda = $pdo->prepare("
     SELECT v.id, v.factura_nro, v.factura_fecha, v.total_flete_neto, c.razon_social AS cliente
     FROM viajes v
@@ -69,145 +66,173 @@ $stmt_agenda->execute([$active_company_id]);
 $agenda_pagos = $stmt_agenda->fetchAll();
 ?>
 
-<div class="card" style="margin-bottom: 30px; position: relative; overflow: hidden; border-left: 6px solid var(--accent);">
-    <div style="height:6px; background:linear-gradient(90deg, var(--accent), #2ecc71, #e67e22); position:absolute; top:0; left:0; right:0;"></div>
-    <div style="padding:16px 0 0 0;">
-        <h1 style="margin:0; font-size:1.8rem;">Panel de Control</h1>
-        <p style="margin:6px 0 0 0; opacity: 0.75;">Estado actual de la operativa.</p>
+<!-- ─── HEADER ─── -->
+<div class="dashboard-header">
+    <div class="header-card">
+        <h1><i class="fas fa-chart-pie"></i> Panel de Control</h1>
+        <p>Estado actual de la operativa · <?= date('d/m/Y') ?></p>
     </div>
 </div>
 
-<style>
-    .stat-card { transition: transform 0.2s; border-bottom: none !important; border-top: 5px solid var(--accent); position: relative; cursor: pointer; text-decoration: none; color: inherit; display: block; border-radius: 12px; overflow: hidden; }
-    .stat-card:hover { transform: translateY(-5px); }
-    .stat-card::after { content: ''; position:absolute; inset:0; background: radial-gradient(circle at top left, rgba(255,255,255,0.22), transparent 55%); pointer-events:none; }
-    .stat-card h3 { font-size: 1.8rem; margin: 10px 0 5px 0; }
-    .stat-card p { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; font-weight: bold; }
-    .alert-box { background: #fff3cd; color: #856404; padding: 15px; border-radius: 10px; border: 1px solid #ffeeba; margin-bottom: 20px; display: flex; align-items: center; gap: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
-    .alert-box.danger { background: #f8d7da; color: #721c24; border-color: #f5c6cb; }
-</style>
-
-
-<!-- Sección de Alertas -->
+<!-- ─── ALERTAS ─── -->
 <?php if ($alertas_vtv > 0 || $alertas_lic > 0): ?>
-    <div style="margin-bottom: 25px;">
+    <div style="margin-bottom: 20px;">
         <?php if ($alertas_vtv > 0): ?>
-            <div class="alert-box danger">
-                <i class="fas fa-exclamation-triangle fa-lg"></i>
-                <span>Hay <strong><?= $alertas_vtv ?> unidad(es)</strong> con VTV vencida o por vencer en los próximos 30 días. <a href="vehiculos" style="color:inherit; font-weight:bold;">Revisar flota</a></span>
+            <div class="modern-alert danger">
+                <div class="alert-icon"><i class="fas fa-exclamation-triangle"></i></div>
+                <div class="alert-text">
+                    Hay <strong><?= $alertas_vtv ?> unidad(es)</strong> con VTV vencida o por vencer en los próximos 30 días.
+                    <a href="vehiculos" class="alert-link">Revisar flota</a>
+                </div>
             </div>
         <?php endif; ?>
         <?php if ($alertas_lic > 0): ?>
-            <div class="alert-box">
-                <i class="fas fa-id-card fa-lg"></i>
-                <span>Hay <strong><?= $alertas_lic ?> chofer(es)</strong> con licencia próxima a vencer. <a href="choferes" style="color:inherit; font-weight:bold;">Ver legajos</a></span>
+            <div class="modern-alert warning">
+                <div class="alert-icon"><i class="fas fa-id-card"></i></div>
+                <div class="alert-text">
+                    Hay <strong><?= $alertas_lic ?> chofer(es)</strong> con licencia próxima a vencer.
+                    <a href="choferes" class="alert-link">Ver legajos</a>
+                </div>
             </div>
         <?php endif; ?>
     </div>
 <?php endif; ?>
 
-<div class="stats-grid">
-    <a href="viajes" class="stat-card" style="border-top-color: #3498db;">
-        <p>En Viaje</p>
-        <h3><?= $count_en_viaje ?></h3>
-        <small>Pendientes de descarga</small>
+<!-- ─── STATS GRID ─── -->
+<div class="stats-grid-modern">
+    <a href="viajes" class="stat-card-modern blue">
+        <i class="fas fa-truck-moving stat-bg-icon"></i>
+        <div class="stat-top">
+            <div class="stat-icon-wrap"><i class="fas fa-truck"></i></div>
+            <span class="stat-badge">Operativos</span>
+        </div>
+        <div class="stat-value"><?= $count_en_viaje ?></div>
+        <div class="stat-label">En Viaje</div>
+        <div class="stat-footer"><i class="fas fa-circle"></i> Pendientes de descarga</div>
     </a>
-    <a href="cobranzas" class="stat-card" style="border-top-color: #f39c12;">
-        <p>Por Facturar</p>
-        <h3><?= $count_por_facturar ?></h3>
-        <small>Descargas confirmadas</small>
+
+    <a href="cobranzas" class="stat-card-modern orange">
+        <i class="fas fa-file-invoice stat-bg-icon"></i>
+        <div class="stat-top">
+            <div class="stat-icon-wrap"><i class="fas fa-file-invoice"></i></div>
+            <span class="stat-badge">Pendientes</span>
+        </div>
+        <div class="stat-value"><?= $count_por_facturar ?></div>
+        <div class="stat-label">Por Facturar</div>
+        <div class="stat-footer"><i class="fas fa-circle"></i> Descargas confirmadas</div>
     </a>
-    <a href="cobranzas" class="stat-card" style="border-top-color: #2ecc71;">
-        <p>Por Cobrar</p>
-        <h3><?= $count_por_cobrar ?></h3>
-        <small>Facturas emitidas</small>
+
+    <a href="cobranzas" class="stat-card-modern green">
+        <i class="fas fa-hand-holding-usd stat-bg-icon"></i>
+        <div class="stat-top">
+            <div class="stat-icon-wrap"><i class="fas fa-hand-holding-usd"></i></div>
+            <span class="stat-badge">Pendientes</span>
+        </div>
+        <div class="stat-value"><?= $count_por_cobrar ?></div>
+        <div class="stat-label">Por Cobrar</div>
+        <div class="stat-footer"><i class="fas fa-circle"></i> Facturas emitidas</div>
     </a>
-    <a href="cobranzas" class="stat-card" style="border-top-color: #e74c3c;">
-        <p>Por Liquidar</p>
-        <h3><?= $count_por_liquidar ?></h3>
-        <small>Saldos choferes pendientes</small>
-    </a>
+
+    <div class="stat-card-modern purple" style="cursor: default;">
+        <i class="fas fa-calendar-alt stat-bg-icon"></i>
+        <div class="stat-top">
+            <div class="stat-icon-wrap"><i class="fas fa-calendar-alt"></i></div>
+            <span class="stat-badge"><?= date('M') ?></span>
+        </div>
+        <div class="stat-value"><?= $count_viajes_mes ?></div>
+        <div class="stat-label">Viajes del Mes</div>
+        <div class="stat-footer"><i class="fas fa-circle"></i> Última semana: <?= $count_viajes_semana ?></div>
+    </div>
+
+    <div class="stat-card-modern teal" style="cursor: default;">
+        <i class="fas fa-coins stat-bg-icon"></i>
+        <div class="stat-top">
+            <div class="stat-icon-wrap"><i class="fas fa-coins"></i></div>
+            <span class="stat-badge">CxC</span>
+        </div>
+        <div class="stat-value"><?= formatMoney($total_cxc) ?></div>
+        <div class="stat-label">Cuentas por Cobrar</div>
+        <div class="stat-footer"><i class="fas fa-circle"></i> <?= $count_por_cobrar ?> factura(s) pendiente(s)</div>
+    </div>
 </div>
 
-<div class="stats-grid" style="margin-top: 20px;">
-    <div class="stat-card" style="border-top-color: #9b59b6; cursor: default;">
-        <p>Viajes del Mes</p>
-        <h3><?= $count_viajes_mes ?></h3>
-        <small>Última semana: <?= $count_viajes_semana ?></small>
-    </div>
-    <div class="stat-card" style="border-top-color: #16a085; cursor: default;">
-        <p>Cuentas por Cobrar</p>
-        <h3><?= formatMoney($total_cxc) ?></h3>
-        <small><?= $count_por_cobrar ?> factura(s) pendiente(s)</small>
-    </div>
-</div>
-
-<div class="responsive-grid" style="margin-top: 30px;">
-    <div class="card">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-            <h3 style="margin:0;"><i class="fas fa-history"></i> Actividad de Viajes Recientes</h3>
-            <a href="viajes" style="font-size: 0.85rem; color: var(--accent); text-decoration: none;">Ver todos <i class="fas fa-external-link-alt"></i></a>
+<!-- ─── CONTENIDO: Actividad + Agenda ─── -->
+<div class="dashboard-grid">
+    <!-- Actividad Reciente -->
+    <div class="dash-card">
+        <div class="dash-card-header">
+            <h3><i class="fas fa-history"></i> Actividad de Viajes Recientes</h3>
+            <a href="viajes" class="card-link">Ver todos <i class="fas fa-arrow-right"></i></a>
         </div>
-
-        <?php if(empty($ultimos_movs)): ?>
-            <p style="text-align:center; padding: 40px; opacity:0.5;">No hay actividad reciente para mostrar.</p>
-        <?php else: ?>
-            <div class="table-container">
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>C. Porte / Ref</th>
-                        <th>Ruta</th>
-                        <th style="text-align:right">Importe Bruto</th>
-                        <th>Estado</th>
-                    </tr>
-                </thead>
-                <tbody>
-                <?php foreach($ultimos_movs as $m): ?>
-                    <tr>
-                        <td><strong><?= htmlspecialchars($m['carta_porte_nro'] ?: '#'.$m['id']) ?></strong></td>
-                        <td><small><?= htmlspecialchars($m['origen']) ?> <i class="fas fa-arrow-right" style="font-size: 10px;"></i> <?= htmlspecialchars($m['destino']) ?></small></td>
-                        <td style="text-align:right; font-weight:bold;"><?= formatMoney($m['total_flete_bruto']) ?></td>
-                        <td><span class="badge" style="background: rgba(0,0,0,0.05); color: var(--text); font-size: 0.7rem;"><?= str_replace('_', ' ', strtoupper($m['estado'])) ?></span></td>
-                    </tr>
-                <?php endforeach; ?>
-                </tbody>
-            </table>
-            </div>
-        <?php endif; ?>
+        <div class="dash-card-body">
+            <?php if(empty($ultimos_movs)): ?>
+                <div class="dash-card-empty">
+                    <i class="fas fa-inbox"></i>
+                    <p>No hay actividad reciente para mostrar.</p>
+                </div>
+            <?php else: ?>
+                <table class="dash-table">
+                    <thead>
+                        <tr>
+                            <th>C. Porte / Ref</th>
+                            <th>Ruta</th>
+                            <th style="text-align:right">Importe</th>
+                            <th>Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    <?php foreach($ultimos_movs as $m): ?>
+                        <tr>
+                            <td class="ref-cell"><?= htmlspecialchars($m['carta_porte_nro'] ?: '#'.$m['id']) ?></td>
+                            <td class="route-cell">
+                                <?= htmlspecialchars($m['origen']) ?>
+                                <i class="fas fa-arrow-right"></i>
+                                <?= htmlspecialchars($m['destino']) ?>
+                            </td>
+                            <td class="amount-cell"><?= formatMoney($m['total_flete_bruto']) ?></td>
+                            <td><span class="status-badge <?= $m['estado'] ?>"><?= str_replace('_', ' ', $m['estado']) ?></span></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+        </div>
     </div>
 
-    <div class="card">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-            <h3 style="margin:0;"><i class="fas fa-calendar-alt"></i> Agenda de Pagos</h3>
-            <a href="cobranzas" style="font-size: 0.85rem; color: var(--accent); text-decoration: none;">Ir a Cobranzas <i class="fas fa-external-link-alt"></i></a>
+    <!-- Agenda de Pagos -->
+    <div class="dash-card">
+        <div class="dash-card-header">
+            <h3><i class="fas fa-calendar-alt"></i> Agenda de Pagos</h3>
+            <a href="cobranzas" class="card-link">Ir a Cobranzas <i class="fas fa-arrow-right"></i></a>
         </div>
-
-        <?php if(empty($agenda_pagos)): ?>
-            <p style="text-align:center; padding: 40px; opacity:0.5;">No hay pagos pendientes en agenda.</p>
-        <?php else: ?>
-            <div class="table-container">
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>Factura</th>
-                        <th>Cliente</th>
-                        <th>F. Factura</th>
-                        <th style="text-align:right">Monto</th>
-                    </tr>
-                </thead>
-                <tbody>
-                <?php foreach($agenda_pagos as $a): ?>
-                    <tr>
-                        <td><strong><?= htmlspecialchars($a['factura_nro'] ?: '#'.$a['id']) ?></strong></td>
-                        <td><?= htmlspecialchars($a['cliente'] ?? '-') ?></td>
-                        <td><small><?= formatDate($a['factura_fecha']) ?></small></td>
-                        <td style="text-align:right; font-weight:bold;"><?= formatMoney($a['total_flete_neto']) ?></td>
-                    </tr>
-                <?php endforeach; ?>
-                </tbody>
-            </table>
-            </div>
-        <?php endif; ?>
+        <div class="dash-card-body">
+            <?php if(empty($agenda_pagos)): ?>
+                <div class="dash-card-empty">
+                    <i class="fas fa-check-circle"></i>
+                    <p>No hay pagos pendientes en agenda.</p>
+                </div>
+            <?php else: ?>
+                <table class="dash-table">
+                    <thead>
+                        <tr>
+                            <th>Factura</th>
+                            <th>Cliente</th>
+                            <th>F. Factura</th>
+                            <th style="text-align:right">Monto</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    <?php foreach($agenda_pagos as $a): ?>
+                        <tr>
+                            <td class="ref-cell"><?= htmlspecialchars($a['factura_nro'] ?: '#'.$a['id']) ?></td>
+                            <td class="client-cell"><?= htmlspecialchars($a['cliente'] ?? '-') ?></td>
+                            <td class="date-cell"><?= formatDate($a['factura_fecha']) ?></td>
+                            <td class="amount-cell"><?= formatMoney($a['total_flete_neto']) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+        </div>
     </div>
 </div>

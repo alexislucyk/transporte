@@ -1,7 +1,6 @@
 <?php
 // DB config centralizada para Trans Cargo Hub.
-
-// IMPORTANTE: core/env.php debe ser cargado ANTES de este archivo.
+// Lee credenciales desde .env con fallbacks seguros.
 
 function env_or_constant(string $key, string $fallback): string {
     $val = getenv($key);
@@ -11,13 +10,10 @@ function env_or_constant(string $key, string $fallback): string {
     return isset($_ENV[$key]) && $_ENV[$key] !== '' ? (string)$_ENV[$key] : $fallback;
 }
 
-
-// FALLBACKS CONFIGURADOS PARA ENTORNO LOCAL (Laragon / XAMPP)
-// Si existe un archivo .env válido, estos valores por defecto se ignoran.
-define('DB_HOST', env_or_constant('DB_HOST', '127.0.0.1')); 
+define('DB_HOST', env_or_constant('DB_HOST', 'localhost'));
 define('DB_NAME', env_or_constant('DB_NAME', 'trans_dev_db'));
 define('DB_USER', env_or_constant('DB_USER', 'root'));
-define('DB_PASS', env_or_constant('DB_PASS', '')); // Vacío por defecto en Laragon
+define('DB_PASS', env_or_constant('DB_PASS', 'isidoro9'));
 
 try {
     $pdo = new PDO(
@@ -35,3 +31,4 @@ try {
     // Mensaje genérico al usuario
     die("Error: No se pudo conectar a la base de datos. Contacte al administrador del sistema.");
 }
+

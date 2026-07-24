@@ -1,0 +1,200 @@
+/* ─── Permisos de Usuario ── */
+.permisos-container {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    width: 100%;
+}
+.permisos-card {
+    background: var(--card, #fff);
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    overflow: hidden;
+}
+.permisos-card-header {
+    padding: 16px 20px;
+    background: linear-gradient(135deg, var(--primary, #2c3e50), var(--accent, #3498db));
+    color: #fff;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.permisos-card-header h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+.permisos-card-body {
+    padding: 20px;
+}
+.permisos-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 10px;
+}
+.permiso-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 2px solid #e8e8e8;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: #fafafa;
+    user-select: none;
+}
+.permiso-item:hover {
+    border-color: var(--accent, #3498db);
+    background: #f0f7ff;
+}
+.permiso-item.checked {
+    border-color: var(--accent, #3498db);
+    background: #e8f4fd;
+}
+.permiso-item input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--accent, #3498db);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.permiso-item .permiso-icon {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    background: rgba(52, 152, 219, 0.1);
+    color: var(--accent, #3498db);
+    font-size: 0.9rem;
+    flex-shrink: 0;
+}
+.permiso-item.checked .permiso-icon {
+    background: var(--accent, #3498db);
+    color: #fff;
+}
+.permiso-item .permiso-label {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text, #2c3e50);
+}
+.user-info-bar {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 16px 20px;
+    background: #f8f9fa;
+    border-radius: 10px;
+    border: 1px solid #e8e8e8;
+    flex-wrap: wrap;
+}
+.user-info-bar .user-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--primary, #2c3e50), var(--accent, #3498db));
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3rem;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+.user-info-bar .user-details {
+    flex: 1;
+}
+.user-info-bar .user-details .user-name {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text, #2c3e50);
+}
+.user-info-bar .user-details .user-meta {
+    font-size: 0.85rem;
+    color: #7f8c8d;
+    display: flex;
+    gap: 15px;
+    flex-wrap: wrap;
+}
+.user-info-bar .user-details .user-meta span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+.badge-role {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.badge-role.developer { background: #e74c3c; color: #fff; }
+.badge-role.admin { background: #f39c12; color: #fff; }
+.badge-role.user { background: #3498db; color: #fff; }
+.permisos-actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    padding-top: 5px;
+}
+.select-all-bar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid #eee;
+    margin-bottom: 15px;
+}
+.select-all-bar button {
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    background: #fff;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.2s;
+}
+.select-all-bar button:hover {
+    border-color: var(--accent, #3498db);
+    color: var(--accent, #3498db);
+}
+.btn-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: 6px;
+    background: #ecf0f1;
+    color: #7f8c8d;
+    text-decoration: none;
+    font-size: 0.9rem;
+    transition: all 0.2s;
+}
+.btn-back:hover {
+    background: #d5dbdb;
+    color: #2c3e50;
+}
+
+/* ─── Responsive ── */
+@media (max-width: 768px) {
+    .permisos-grid {
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    }
+}
+@media (max-width: 500px) {
+    .permisos-grid {
+        grid-template-columns: 1fr;
+    }
+    .user-info-bar {
+        flex-direction: column;
+        text-align: center;
+    }
+    .user-info-bar > div:last-child {
+        margin-left: 0 !important;
+    }
+}

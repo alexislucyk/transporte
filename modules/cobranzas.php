@@ -57,45 +57,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        if ($action === 'cobrar') {
-            if ($estado !== 'facturado') {
-                $error = "Solo se puede cobrar cuando el viaje está 'facturado'.";
-            } else {
-                $fecha_cobro = $_POST['fecha_cobro'] ?? date('Y-m-d');
-                $medio_cobro = trim($_POST['medio_cobro'] ?? '');
-                $monto_cobro = (float)($_POST['monto_cobro'] ?? 0);
-                $retenciones = (float)($_POST['retenciones'] ?? 0);
-                $observaciones_cobro = trim($_POST['observaciones_cobro'] ?? '');
-
-                if ($monto_cobro <= 0) {
-                    $error = 'El monto cobrado debe ser mayor a 0.';
-                } else {
-                    // El modelo actual en viajes_detalle.php guarda:
-                    // - fecha_cobro
-                    // - estado = cobrado
-                    // - observaciones (concatenada)
-                    // No asumimos columnas extra para medio/retenciones.
-                    $pdo->prepare("
-                        UPDATE viajes
-                        SET fecha_cobro = ?,
-                            estado = 'cobrado',
-                            observaciones = CASE
-                                WHEN observaciones IS NULL OR observaciones = '' THEN ?
-                                ELSE CONCAT(observaciones, ' | ', ?)
-                            END
-                        WHERE id = ? AND transportista_id = ? AND activo = 1
-                    ")->execute([
-                        $fecha_cobro,
-                        ($observaciones_cobro !== '' ? $observaciones_cobro : "Cobro registrado"),
-                        ($observaciones_cobro !== '' ? $observaciones_cobro : "Cobro registrado"),
-                        $viaje_id,
-                        $active_company_id
-                    ]);
-
-                    $mensaje = "Cobro registrado exitosamente.";
+            if ($action === 'cobrar') {
+                // Redirigir al módulo detallado de cobros
+                $viaje_id_param = (int)($_POST['viaje_id'] ?? 0);
+                if ($viaje_id_param > 0) {
+                    header("Location: cobranzas_fletes_liquidar?cobrar_viaje_id={$viaje_id_param}");
+                    exit;
                 }
+                $error = 'ID de viaje inválido para redirigir al cobro.';
             }
-        }
     }
 }
 
@@ -139,45 +109,65 @@ $stmt->execute([$active_company_id]);
 $viajes_facturados = $stmt->fetchAll();
 ?>
 
-<div class="card" style="margin-bottom:20px;">
-    <h2 style="margin:0 0 10px 0;"><?= $titles['cobranzas'] ?? 'Gestión de Cobranzas' ?></h2>
+<div class="card" style="margin-bottom:20px; position:relative; overflow:hidden;">
+    <div style="height:6px; background:linear-gradient(90deg, #2c3e50, #3498db, #27ae60, #e67e22); position:absolute; top:0; left:0; right:0;"></div>
 
-    <?php if ($mensaje): ?>
-        <div class="alert alert-success"><i class="fas fa-check-circle"></i> <?= htmlspecialchars($mensaje) ?></div>
-    <?php endif; ?>
-    <?php if ($error): ?>
-        <div class="alert alert-error"><i class="fas fa-exclamation-triangle"></i> <?= htmlspecialchars($error) ?></div>
-    <?php endif; ?>
+    <div style="padding:16px; display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
+        <div>
+            <h2 style="margin:0; font-size:1.25rem; font-weight:800;">
+                <i class="fas fa-wallet" style="color:var(--accent); margin-right:8px;"></i>
+                <?= $titles['cobranzas'] ?? 'Gestión de Cobranzas' ?>
+            </h2>
+            <div style="margin-top:6px; opacity:0.7; font-size:0.95rem;">
+                <i class="fas fa-info-circle"></i> Continuación desde Viajes
+            </div>
+        </div>
 
-    <div style="display:flex; gap:10px; flex-wrap:wrap; margin:12px 0;">
-        <a class="btn-secondary" href="cobranzas_fletes_pendientes" style="text-decoration:none;">
-            <i class="fas fa-hourglass-half"></i> Fletes Pendientes
-        </a>
-        <a class="btn-secondary" href="cobranzas_fletes_factura" style="text-decoration:none;">
-            <i class="fas fa-file-invoice"></i> Fletes a Facturar
-        </a>
-        <a class="btn-secondary" href="cobranzas_fletes_liquidar" style="text-decoration:none;">
-            <i class="fas fa-money-check-alt"></i> Fletes a Cobrar
-        </a>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-start;">
+            <?php if ($mensaje): ?>
+                <span class="badge" style="background:#27ae60; color:#fff; font-size:0.9rem; padding:8px 14px;">
+                    <i class="fas fa-check-circle"></i> <?= htmlspecialchars($mensaje) ?>
+                </span>
+            <?php endif; ?>
+            <?php if ($error): ?>
+                <span class="badge" style="background:#e74c3c; color:#fff; font-size:0.9rem; padding:8px 14px;">
+                    <i class="fas fa-exclamation-triangle"></i> <?= htmlspecialchars($error) ?>
+                </span>
+            <?php endif; ?>
+        </div>
     </div>
+
+        
 </div>
 
 <div class="card" style="margin-bottom:20px;">
-    <h3 style="margin-top:0;"><i class="fas fa-box-open"></i> Viajes Descargados (Facturar)</h3>
+    <h3 style="margin-top:0; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <i class="fas fa-box-open"></i> Viajes Descargados (Facturar)
+        <span class="badge" style="background:#e67e22; color:#fff; font-size:0.8rem; padding:4px 10px;">
+            <?= count($viajes_descargados) ?> pendientes
+        </span>
+        <a href="cobranzas_fletes_factura_lote" class="btn-primary" style="background:#9b59b6; border:none; padding:6px 12px; font-size:0.85rem; display:inline-flex; align-items:center; gap:6px; text-decoration:none; margin-left:auto;">
+            <i class="fas fa-layer-group"></i> Facturar en Lote
+        </a>
+    </h3>
 
     <?php if (empty($viajes_descargados)): ?>
-        <p style="opacity:0.7; text-align:center; padding:20px;">No hay viajes descargados para facturar.</p>
+        <p style="opacity:0.7; text-align:center; padding:30px;">
+            <i class="fas fa-check-circle" style="color:#27ae60; font-size:2rem; display:block; margin-bottom:10px;"></i>
+            No hay viajes descargados pendientes de facturar.
+        </p>
     <?php else: ?>
         <div class="table-container">
             <table class="data-table">
                 <thead>
                     <tr>
-                        <th>Viaje</th>
+                        <th>CTG / Documento</th>
                         <th>Cliente</th>
-                        <th>Chofer</th>
-                        <th>Factura</th>
-                        <th style="text-align:right;">Total</th>
-                        <th style="text-align:center;">Acción</th>
+                        <th>Origen → Destino</th>
+                        <th>Patente</th>
+                        <th style="text-align:right;">TN Desc.</th>
+                        <th style="text-align:right;">Monto a Facturar</th>
+                        <th style="text-align:center;">Acciones</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -186,102 +176,170 @@ $viajes_facturados = $stmt->fetchAll();
                              (!empty($v['carta_porte_nro']) ? ('CP ' . $v['carta_porte_nro']) :
                              (!empty($v['otros_docs']) ? (string)$v['otros_docs'] : ('Viaje #' . (int)$v['id'])));
                     $monto = (float)($v['total_flete_neto'] ?? 0);
+                    $tn_desc = (float)($v['peso_neto'] ?? 0);
                 ?>
                     <tr>
                         <td><?= htmlspecialchars($label) ?></td>
                         <td><?= htmlspecialchars($v['cliente_nombre'] ?? '-') ?></td>
-                        <td><?= htmlspecialchars($v['chofer_nombre'] ?? '-') ?></td>
-                        <td>
-                            —
+                        <td style="font-size:0.9rem;">
+                            <?= htmlspecialchars($v['origen'] ?? '-') ?>
+                            <i class="fas fa-arrow-right" style="color:#999; font-size:0.7rem; margin:0 4px;"></i>
+                            <?= htmlspecialchars($v['destino'] ?? '-') ?>
                         </td>
-                        <td style="text-align:right; font-weight:bold;">$ <?= number_format($monto, 2, ',', '.') ?></td>
+                        <td><?= htmlspecialchars($v['vehiculo_dominio'] ?? '-') ?></td>
+                        <td style="text-align:right;"><?= number_format($tn_desc, 2, ',', '.') ?></td>
+                        <td style="text-align:right; font-weight:bold; color:#27ae60;">
+                            $ <?= number_format($monto, 2, ',', '.') ?>
+                        </td>
                         <td style="text-align:center;">
-                            <form method="POST" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:center;">
-                                <input type="hidden" name="action" value="facturar">
-                                <input type="hidden" name="viaje_id" value="<?= (int)$v['id'] ?>">
-                                <input type="text" name="factura_nro" class="input-field" placeholder="A 00001-00000001" required style="min-width:220px;">
-                                <input type="date" name="factura_fecha" class="input-field" value="<?= date('Y-m-d') ?>">
-                                <button type="submit" class="btn-primary" style="background:#9b59b6; border:none;">
+                            <div style="display:flex; gap:6px; justify-content:center; flex-wrap:wrap;">
+                                <!-- <a class="btn-primary" style="background:#3498db; border:none; padding:8px 12px; display:inline-flex; align-items:center; gap:6px; text-decoration:none; font-size:0.85rem;"
+                                   href="viajes_detalle?viaje_id=<?= (int)$v['id'] ?>">
+                                    <i class="fas fa-eye"></i> Detalle
+                                </a> -->
+                                <a class="btn-primary" style="background:#e67e22; border:none; padding:8px 12px; display:inline-flex; align-items:center; gap:6px; text-decoration:none; font-size:0.85rem;"
+                                   href="viajes_detalle?viaje_id=<?= (int)$v['id'] ?>&from=cobranzas">
+                                    <i class="fas fa-edit"></i> Editar
+                                </a>
+                                <a class="btn-primary" style="background:#9b59b6; border:none; padding:8px 12px; display:inline-flex; align-items:center; gap:6px; text-decoration:none; font-size:0.85rem;"
+                                   href="cobranzas_fletes_factura?viaje_id=<?= (int)$v['id'] ?>">
                                     <i class="fas fa-file-invoice"></i> Facturar
-                                </button>
-                            </form>
+                                </a>
+                            </div>
                         </td>
                     </tr>
                 <?php endforeach; ?>
                 </tbody>
+                <tfoot>
+                    <tr style="font-weight:bold; background:#f8f9fa;">
+                        <td colspan="5" style="text-align:right;">Totales:</td>
+                        <td style="text-align:right; color:#27ae60;">
+                            $ <?= number_format(array_sum(array_map(function($v) { return (float)($v['total_flete_neto'] ?? 0); }, $viajes_descargados)), 2, ',', '.') ?>
+                        </td>
+                        <td></td>
+                    </tr>
+                </tfoot>
             </table>
         </div>
     <?php endif; ?>
 </div>
 
 <div class="card">
-    <h3 style="margin-top:0;"><i class="fas fa-wallet"></i> Viajes Facturados (Cobrar)</h3>
+    <h3 style="margin-top:0; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <i class="fas fa-wallet" style="color:#9b59b6;"></i> Viajes Facturados (Cobrar)
+        <?php if (!empty($viajes_facturados)): ?>
+        <span class="badge" style="background:#9b59b6; color:#fff; font-size:0.8rem; padding:4px 10px;">
+            <?= count($viajes_facturados) ?> pendientes
+        </span>
+        <?php endif; ?>
+        <a href="cobranzas_fletes_cobro_lote" class="btn-primary" style="background:#27ae60; border:none; padding:6px 12px; font-size:0.85rem; display:inline-flex; align-items:center; gap:6px; text-decoration:none; margin-left:auto;">
+            <i class="fas fa-check-double"></i> Cobrar en Lote
+        </a>
+    </h3>
 
     <?php if (empty($viajes_facturados)): ?>
-        <p style="opacity:0.7; text-align:center; padding:20px;">No hay viajes facturados para cobrar.</p>
+        <p style="opacity:0.7; text-align:center; padding:20px;">
+            <i class="fas fa-check-circle" style="color:#27ae60; font-size:1.5rem; display:block; margin-bottom:8px;"></i>
+            No hay viajes facturados pendientes de cobro.
+        </p>
     <?php else: ?>
         <div class="table-container">
             <table class="data-table">
                 <thead>
                     <tr>
-                        <th>Viaje</th>
+                        <th>CTG / Documento</th>
                         <th>Cliente</th>
-                        <th>Factura</th>
-                        <th style="text-align:right;">Monto</th>
-                        <th style="text-align:center;">Registrar Cobro</th>
+                        <th>Origen → Destino</th>
+                        <th>Factura N°</th>
+                        <th style="text-align:right;">Neto</th>
+                        <th style="text-align:right;">Total Facturado</th>
+                        <th>Fecha Fact.</th>
+                        <th>Días</th>
+                        <th style="text-align:center;">Cobrar</th>
                     </tr>
                 </thead>
                 <tbody>
-                <?php foreach ($viajes_facturados as $v):
+                <?php 
+                $sum_neto = 0;
+                $sum_total = 0;
+                foreach ($viajes_facturados as $v):
                     $label = !empty($v['ctg_nro']) ? ('CTG ' . $v['ctg_nro']) :
                              (!empty($v['carta_porte_nro']) ? ('CP ' . $v['carta_porte_nro']) :
                              (!empty($v['otros_docs']) ? (string)$v['otros_docs'] : ('Viaje #' . (int)$v['id'])));
-                    $monto = (float)($v['total_flete_neto'] ?? 0);
+                    $neto    = (float)($v['total_flete_neto'] ?? 0);
+                    $total_fact = $neto * 1.21; // IVA 21% incluido
                     $factura_nro = $v['factura_nro'] ?? '';
                     $factura_fecha = $v['factura_fecha'] ?? '';
+                    
+                    // Calcular días desde facturación
+                    $dias_desde = '';
+                    $dias_color = '';
+                    if ($factura_fecha !== '' && $factura_fecha !== null) {
+                        try {
+                            $fecha_fact_dt = new DateTime($factura_fecha);
+                            $hoy = new DateTime();
+                            $diff = $fecha_fact_dt->diff($hoy);
+                            $dias_desde = (int)$diff->days;
+                            if ($dias_desde <= 7) $dias_color = '#27ae60';
+                            elseif ($dias_desde <= 15) $dias_color = '#e67e22';
+                            elseif ($dias_desde <= 30) $dias_color = '#e74c3c';
+                            else $dias_color = '#8e44ad';
+                        } catch (Exception $e) {
+                            $dias_desde = '-';
+                        }
+                    }
+                    
+                    $sum_neto += $neto;
+                    $sum_total += $total_fact;
                 ?>
                     <tr>
-                        <td><?= htmlspecialchars($label) ?></td>
+                        <td style="font-weight:600;"><?= htmlspecialchars($label) ?></td>
                         <td><?= htmlspecialchars($v['cliente_nombre'] ?? '-') ?></td>
-                        <td>
-                            <div style="display:flex; flex-direction:column; gap:2px;">
-                                <span><strong>N°:</strong> <?= htmlspecialchars($factura_nro !== '' ? $factura_nro : '-') ?></span>
-                                <span style="opacity:0.75;"><strong>Fecha:</strong> <?= htmlspecialchars($factura_fecha !== '' ? $factura_fecha : '-') ?></span>
-                            </div>
+                        <td style="font-size:0.85rem;">
+                            <?= htmlspecialchars($v['origen'] ?? '-') ?>
+                            <i class="fas fa-arrow-right" style="color:#999; font-size:0.65rem; margin:0 3px;"></i>
+                            <?= htmlspecialchars($v['destino'] ?? '-') ?>
                         </td>
-                        <td style="text-align:right; font-weight:bold;">$ <?= number_format($monto, 2, ',', '.') ?></td>
                         <td>
-                            <form method="POST" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:flex-start;">
-                                <input type="hidden" name="action" value="cobrar">
-                                <input type="hidden" name="viaje_id" value="<?= (int)$v['id'] ?>">
-
-                                <input type="number" step="0.01" min="0.01" name="monto_cobro" class="input-field" required
-                                       value="<?= number_format($monto, 2, '.', '') ?>" style="width:140px;">
-
-                                <input type="number" step="0.01" min="0" name="retenciones" class="input-field"
-                                       value="0" style="width:120px;">
-
-                                <select name="medio_cobro" class="input-field" style="width:170px;">
-                                    <option value="">-- Medio --</option>
-                                    <option value="efectivo">Efectivo</option>
-                                    <option value="transferencia">Transferencia</option>
-                                    <option value="cheque">Cheque</option>
-                                    <option value="mercadopago">Mercado Pago</option>
-                                    <option value="otro">Otro</option>
-                                </select>
-
-                                <input type="date" name="fecha_cobro" class="input-field" value="<?= date('Y-m-d') ?>">
-
-                                <input type="text" name="observaciones_cobro" class="input-field" placeholder="Observaciones" style="min-width:180px;">
-
-                                <button type="submit" class="btn-primary" style="background:#27ae60; border:none;">
+                            <span style="font-weight:bold; font-size:0.9rem;"><?= htmlspecialchars($factura_nro ?: '-') ?></span>
+                        </td>
+                        <td style="text-align:right;">$ <?= number_format($neto, 2, ',', '.') ?></td>
+                        <td style="text-align:right; font-weight:bold; color:#27ae60;">
+                            $ <?= number_format($total_fact, 2, ',', '.') ?>
+                        </td>
+                        <td><?= htmlspecialchars(formatDate($factura_fecha)) ?></td>
+                        <td style="text-align:center;">
+                            <?php if ($dias_desde !== ''): ?>
+                                <span style="display:inline-block; padding:2px 8px; border-radius:12px; font-weight:bold; font-size:0.8rem; background:<?= $dias_color ?>20; color:<?= $dias_color ?>;">
+                                    <?= $dias_desde ?>d
+                                </span>
+                            <?php else: ?>
+                                <span style="opacity:0.4;">—</span>
+                            <?php endif; ?>
+                        </td>
+                        <td style="text-align:center;">
+                            <div style="display:flex; gap:6px; justify-content:center; flex-wrap:wrap;">
+                                <a class="btn-primary" style="background:#e67e22; border:none; padding:8px 12px; display:inline-flex; align-items:center; gap:6px; text-decoration:none; font-size:0.85rem;"
+                                   href="cobranzas_fletes_factura?viaje_id=<?= (int)$v['id'] ?>">
+                                    <i class="fas fa-edit"></i> Editar
+                                </a>
+                                <a href="cobranzas_fletes_liquidar?cobrar_viaje_id=<?= (int)$v['id'] ?>"
+                                   class="btn-primary" style="background:#27ae60; border:none; padding:8px 14px; font-size:0.85rem; display:inline-flex; align-items:center; gap:6px; text-decoration:none;">
                                     <i class="fas fa-check-double"></i> Cobrar
-                                </button>
-                            </form>
+                                </a>
+                            </div>
                         </td>
                     </tr>
                 <?php endforeach; ?>
                 </tbody>
+                <tfoot>
+                    <tr style="font-weight:bold; background:#f8f9fa;">
+                        <td colspan="4" style="text-align:right;">Totales:</td>
+                        <td style="text-align:right;">$ <?= number_format($sum_neto, 2, ',', '.') ?></td>
+                        <td style="text-align:right; color:#27ae60;">$ <?= number_format($sum_total, 2, ',', '.') ?></td>
+                        <td colspan="3"></td>
+                    </tr>
+                </tfoot>
             </table>
         </div>
     <?php endif; ?>

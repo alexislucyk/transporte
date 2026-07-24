@@ -1,5 +1,5 @@
 <?php
-/// ***
+/// modules/viajes.php
 /**
  * Modulo de Gestion de Viajes - Trans Cargo Hub
  * Multi-tenant 100% aislado por transportista_id.
@@ -29,19 +29,13 @@ if ((int)$active_company_id <= 0) {
         $adminRootId = $_SESSION['admin_root_id'] ?? null;
 
         if (!$adminRootId) {
-            $userRole = $_SESSION['user_role'] ?? 'user';
-            if ($userRole === 'developer' || $userRole === 'admin') {
-                // Developer y Admin son su propio root
-                $adminRootId = (int)$_SESSION['user_id'];
-            } else {
-                // Usuario normal: buscar el admin que lo creó
-                $stmtAdmin = $pdo->prepare("SELECT created_by FROM users WHERE id = ? AND role <> 'developer' LIMIT 1");
-                $stmtAdmin->execute([$_SESSION['user_id']]);
-                $adminRootId = (int)($stmtAdmin->fetchColumn() ?: 0);
-                if (!$adminRootId) {
-                    $adminRootId = (int)$_SESSION['user_id'];
-                }
-            }
+            $stmtAdmin = $pdo->prepare("SELECT created_by FROM users WHERE id = ? AND role <> 'developer' LIMIT 1");
+            $stmtAdmin->execute([$_SESSION['user_id']]);
+            $adminRootId = (int)($stmtAdmin->fetchColumn() ?: 0);
+        }
+
+        if (!$adminRootId) {
+            $adminRootId = (int)$_SESSION['user_id'];
         }
 
         $stmt_trans = $pdo->prepare("SELECT id FROM transportistas WHERE created_by = ? ORDER BY razon_social ASC LIMIT 1");
@@ -123,9 +117,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     $tarifa_tonelada = (float)($_POST['tarifa_tonelada'] ?? 0);
     $peso_bruto_est = (float)($_POST['peso_estimado'] ?? 0); // TN Estimadas
 
+
     $peso_tara      = (float)($_POST['peso_tara'] ?? 0);
-    $peso_estimado_tn = (float)($_POST['peso_estimado'] ?? $peso_bruto_est);
+    $peso_estimado_tn = (float)($_POST['peso_estimado'] ?? $peso_bruto_est); // Nuevo: mantener peso estimado
     $peso_estimado_tn = max(0, $peso_estimado_tn);
+
+
 
     $chofer_porcentaje = (float)($_POST['chofer_porcentaje'] ?? 0);
     $comision_tipo  = $_POST['comision_tipo'] ?? 'ninguna';
@@ -161,8 +158,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
             // Cálculos financieros iniciales
             $total_flete_bruto = $peso_bruto_est * $tarifa_tonelada;
-            $total_flete_neto  = $total_flete_bruto; // Sin tara aún (es TN estimadas)
-            $peso_estimado = $peso_estimado_tn;
+                    $total_flete_neto  = $total_flete_bruto; // Sin tara aún (es TN estimadas)
+
+                    // Peso estimado (TN) - guardar en columna peso_estimado
+                    $peso_estimado = $peso_estimado_tn;
 
             try {
                 $sql = "INSERT INTO viajes
@@ -210,6 +209,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     $peso_estimado
                 ]);
 
+
+
                 $mensaje = "Viaje registrado exitosamente.";
 
             } catch (PDOException $e) {
@@ -238,6 +239,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             if (!empty($campos_faltan)) {
                 $error = "Campos obligatorios: " . implode(', ', $campos_faltan) . ".";
             } else {
+                // Recalcular totales (puede haber cambiado tarifa o peso estimado)
                 $total_flete_bruto = $peso_bruto_est * $tarifa_tonelada;
                 $total_flete_neto  = ($peso_bruto_est - $peso_tara) * $tarifa_tonelada;
 
@@ -249,9 +251,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         total_flete_bruto = ?, total_flete_neto = ?,
                         comision_tipo = ?, comision_valor = ?, comisionista_id = ?,
                         ctg_nro = ?, carta_porte_nro = ?, otros_docs = ?,
-                        pagador_id = ?, observaciones = ?,
-                        peso_estimado = ?
+                    pagador_id = ?, observaciones = ?,
+                    peso_estimado = ?
                         WHERE id = ? AND transportista_id = ? AND activo = 1";
+
 
                     $stmt = $pdo->prepare($sql);
                     $stmt->execute([
@@ -280,6 +283,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         $id,
                         $active_company_id
                     ]);
+
 
                     $mensaje = "Viaje actualizado exitosamente.";
                 } catch (PDOException $e) {
@@ -318,6 +322,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         } elseif ($peso_neto_real <= 0) {
             $error = "El Peso Neto descargado debe ser mayor a 0.";
         } elseif ($usar_bruto_tara === 1) {
+            // Modo: usuario carga Bruto y Tara
             if ($peso_bruto_real <= 0) {
                 $error = "El Peso Bruto real debe ser mayor a 0.";
             } elseif ($peso_tara_real < 0) {
@@ -328,6 +333,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
 
         if (!$error) {
+            // Obtener la tarifa actual del viaje
             $stmt = $pdo->prepare("SELECT tarifa_tonelada, chofer_porcentaje FROM viajes WHERE id = ? AND transportista_id = ? AND activo = 1");
             $stmt->execute([$id, $active_company_id]);
             $viaje_data = $stmt->fetch();
@@ -338,6 +344,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $tarifa = (float)$viaje_data['tarifa_tonelada'];
                 $chofer_pct = (float)$viaje_data['chofer_porcentaje'];
 
+                // Si NO se cargó bruto/tara, persistimos neto de forma consistente
                 if ($usar_bruto_tara !== 1) {
                     $peso_bruto_real = $peso_neto_real;
                     $peso_tara_real = 0;
@@ -354,6 +361,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         WHERE id = ? AND transportista_id = ? AND activo = 1")
                         ->execute([$peso_bruto_real, $peso_tara_real, $total_flete_bruto, $total_flete_neto, $id, $active_company_id]);
 
+
+                    // Impacto contable: registrar en cuenta corriente del chofer
                     if (!empty($viaje_data['chofer_porcentaje']) && $viaje_data['chofer_porcentaje'] > 0) {
                         $stmt_ch = $pdo->prepare("SELECT chofer_id FROM viajes WHERE id = ?");
                         $stmt_ch->execute([$id]);
@@ -362,6 +371,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                             $ganancia_chofer = $total_flete_neto * ($chofer_pct / 100);
                             $stmt_pago = $pdo->prepare("INSERT INTO chofer_pagos (chofer_id, fecha, monto, tipo, detalle) VALUES (?, ?, ?, 'liquidacion', ?)");
 
+                            // Referencia contable del viaje para el chofer: CTG > CP > Otros Docs > ID
                             $detalle_ref = '';
                             if (!empty($viaje_data['ctg_nro'])) {
                                 $detalle_ref = 'CTG ' . $viaje_data['ctg_nro'];
@@ -391,6 +401,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 }
 
+// El estado "liquidado" en la lista principal se refiere a viajes que han pasado por la etapa de descarga y cuyos pagos/gastos asociados han sido liquidados internamente (e.g., el chofer recibió su liquidación), pero aún no necesariamente facturados o cobrados formalmente al cliente/pagador de flete. Es un estado intermedio post-descarga y pre-facturación/cobro.
 $filtro_estado = $_GET['estado'] ?? 'todos';
 $where_estado = "";
 $params = [$active_company_id];
@@ -416,15 +427,9 @@ $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $viajes = $stmt->fetchAll();
 ?>
-
-<!-- CDN de PDF.js para lectura de PDFs en el navegador -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
-<script>
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
-</script>
-
 <!-- Vista del listado -->
-<div id="viajes-page">
+<div id="viajes-page" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+
     <div>
         <a href="inicio" style="text-decoration:none; color:var(--accent); margin-bottom:8px; display:inline-block;">
             <i class="fas fa-arrow-left"></i> Inicio
@@ -450,6 +455,7 @@ $viajes = $stmt->fetchAll();
     </div>
 </div>
 
+
 <?php if ($mensaje): ?>
 <div class="alert alert-success">
     <i class="fas fa-check-circle"></i> <?= htmlspecialchars($mensaje) ?>
@@ -462,10 +468,10 @@ $viajes = $stmt->fetchAll();
 </div>
 <?php endif; ?>
 
-<div class="card viajes-filter-card">
+<div class="card" style="margin-bottom: 20px; position:relative; overflow:hidden;">
     <div style="height:6px; background:linear-gradient(90deg, #2c3e50, #3498db, #2ecc71, #e67e22); position:absolute; top:0; left:0; right:0;"></div>
     <div style="padding: 14px 16px;">
-        <form method="GET" class="viajes-filter-form">
+        <form method="GET" style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
             <input type="hidden" name="route" value="viajes">
             <label style="font-weight: bold; opacity: 0.8; display:flex; align-items:center; gap:8px;">
                 <i class="fas fa-filter" style="color:var(--accent);"></i> Filtrar por estado:
@@ -483,12 +489,13 @@ $viajes = $stmt->fetchAll();
     </div>
 </div>
 
+
 <div class="card">
     <?php if (empty($viajes)): ?>
         <p style="text-align:center; padding: 40px; opacity:0.5;">No hay viajes registrados.</p>
     <?php else: ?>
         <div class="table-container">
-        <table class="data-table viajes-table">
+        <table class="data-table">
             <thead>
                 <tr>
                     <th>Fecha</th>
@@ -512,16 +519,12 @@ $viajes = $stmt->fetchAll();
                         default      => htmlspecialchars($v['estado'])
                     };
 
+                    // Determinar qué documentos tiene
                     $docs_parts = [];
                     if (!empty($v['ctg_nro']))          $docs_parts[] = 'CTG: ' . $v['ctg_nro'];
                     if (!empty($v['carta_porte_nro']))  $docs_parts[] = 'CP: ' . $v['carta_porte_nro'];
                     if (!empty($v['otros_docs']))       $docs_parts[] = $v['otros_docs'];
                     $docs_label = !empty($docs_parts) ? implode(' | ', $docs_parts) : '-';
-
-                    // Formatear numéricos a 2 decimales para JS
-                    $v['tarifa_tonelada'] = number_format((float)$v['tarifa_tonelada'], 2, '.', '');
-                    $v['peso_estimado']   = number_format((float)($v['peso_estimado'] ?? $v['peso_bruto']), 2, '.', '');
-                    $v['comision_valor']  = number_format((float)$v['comision_valor'], 2, '.', '');
                 ?>
                 <tr>
                     <td><?= htmlspecialchars(formatDate($v['fecha_carga'])) ?></td>
@@ -536,15 +539,25 @@ $viajes = $stmt->fetchAll();
                     <td style="font-weight:bold;">$ <?= number_format($v['total_flete_neto'], 2, ',', '.') ?></td>
                     <td><?= $estado_badge ?></td>
                     <td style="text-align:center; white-space:nowrap;">
+
+
+                        <?php if ($v['estado'] === 'en_viaje'): ?>
+                        <!-- <a href="viajes_detalle?viaje_id=<?= (int)$v['id'] ?>" title="Registrar Descarga" style="background:none; border:none; color:#27ae60; cursor:pointer; margin-right:6px;">
+                            <i class="fas fa-weight-hanging"></i>
+                        </a> -->
+                        <?php endif; ?>
+
                         <a href="viajes_detalle?viaje_id=<?= (int)$v['id'] ?>" title="Ver Detalle" style="background:none; border:none; color:var(--accent); cursor:pointer; margin-right:6px;">
                             <i class="fas fa-eye"></i>
                         </a>
+
 
                         <?php if ($v['estado'] === 'en_viaje'): ?>
                             <button onclick='editViaje(<?= json_encode($v, JSON_HEX_APOS | JSON_HEX_QUOT) ?>)' title="Editar" style="background:none; border:none; color:var(--accent); cursor:pointer; margin-right:6px;">
                                 <i class="fas fa-edit"></i>
                             </button>
                         <?php endif; ?>
+
 
                         <button onclick="confirmarBorrarViaje(<?= (int)$v['id'] ?>, '<?= htmlspecialchars($v['ctg_nro'] ?: 'Viaje #' . $v['id'], ENT_QUOTES) ?>')" title="Eliminar" style="background:none; border:none; color:#e74c3c; cursor:pointer;">
                             <i class="fas fa-trash-alt"></i>
@@ -558,25 +571,28 @@ $viajes = $stmt->fetchAll();
     <?php endif; ?>
 </div>
 
-<!-- MODAL: NUEVO / EDITAR VIAJE -->
+<!-- ══════════════════════════════════════════════════════════
+     MODAL: NUEVO / EDITAR VIAJE
+     ══════════════════════════════════════════════════════════ -->
 <div id="modal-viaje" class="modal">
-    <div class="modal-content" id="modal-viaje-content">
-        <div class="modal-header" id="modal-viaje-header">
-            <h3 style="margin:0; font-size:0.95rem;" id="viaje-modal-title">
-                <i class="fas fa-truck" style="margin-right:6px;"></i> Registrar Viaje
+    <div class="modal-content" style="max-width: 800px;">
+        <div class="modal-header" style="background:linear-gradient(135deg, #2c3e50, #34495e); color:#fff; padding:12px 16px; border-radius:10px 10px 0 0;">
+            <h3 style="margin:0; font-size:1.1rem;" id="viaje-modal-title">
+                <i class="fas fa-truck" style="margin-right:8px;"></i> Registrar Viaje
             </h3>
-            <span class="close-modal" onclick="closeModal('modal-viaje')" style="color:#fff; font-size:1.1rem;">&times;</span>
+            <span class="close-modal" onclick="closeModal('modal-viaje')" style="color:#fff; font-size:1.2rem;">&times;</span>
         </div>
         <form method="POST" id="form-viaje">
-            <div class="modal-body" id="modal-viaje-body">
+            <div class="modal-body" style="padding:16px;">
 
                 <input type="hidden" name="action" id="viaje-action" value="nuevo">
+
                 <input type="hidden" name="id" id="viaje-id">
 
                 <!-- Fila 1: Cliente + Producto -->
-                <div class="viaje-grid-2">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
                     <div class="form-group">
-                        <label>Cliente <span class="req">*</span></label>
+                        <label>Cliente *</label>
                         <select name="cliente_id" id="viaje-cliente" class="input-field" required>
                             <option value="">-- Seleccionar --</option>
                             <?php foreach($clientes as $cl): ?>
@@ -585,27 +601,27 @@ $viajes = $stmt->fetchAll();
                         </select>
                     </div>
                     <div class="form-group">
-                        <label>Producto <span class="req">*</span></label>
+                        <label>Producto *</label>
                         <input type="text" name="producto" id="viaje-producto" class="input-field" required placeholder="Ej: Soja, Maíz, Trigo...">
                     </div>
                 </div>
 
                 <!-- Fila 2: Origen + Destino -->
-                <div class="viaje-grid-2">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
                     <div class="form-group">
-                        <label>Origen <span class="req">*</span></label>
+                        <label>Origen *</label>
                         <input type="text" name="origen" id="viaje-origen" class="input-field" required placeholder="Ciudad / Provincia">
                     </div>
                     <div class="form-group">
-                        <label>Destino <span class="req">*</span></label>
+                        <label>Destino *</label>
                         <input type="text" name="destino" id="viaje-destino" class="input-field" required placeholder="Ciudad / Provincia">
                     </div>
                 </div>
 
-                <!-- Fila 3: Vehículo + Acoplado + Chofer -->
-                <div class="viaje-grid-3">
+                <!-- Fila 3: Vehículo (auto-selects chofer y acoplado) + Acoplado -->
+                <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; margin-bottom: 12px;">
                     <div class="form-group">
-                        <label>Vehículo <span class="req">*</span></label>
+                        <label>Vehículo *</label>
                         <select name="vehiculo_id" id="viaje-vehiculo" class="input-field" required>
                             <option value="">-- Seleccionar --</option>
                             <?php foreach($vehiculos as $v): ?>
@@ -636,7 +652,7 @@ $viajes = $stmt->fetchAll();
                 </div>
 
                 <!-- Fila 4: Documentación -->
-                <div class="viaje-grid-3">
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 12px;">
                     <div class="form-group">
                         <label>CTG N°</label>
                         <input type="text" name="ctg_nro" id="viaje-ctg" class="input-field" placeholder="CTG-#####">
@@ -651,24 +667,46 @@ $viajes = $stmt->fetchAll();
                     </div>
                 </div>
 
-                <!-- Fila 5: Fecha + TN Estimadas + Tarifa -->
-                <div class="viaje-grid-3">
+                 <!-- Fila 4b: Carga de Carta de Porte PDF -->
+                 <div class="form-group">
+                     <label style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+                         <i class="fas fa-file-pdf" style="color:#e74c3c; font-size:1.1rem;"></i>
+                         <span style="font-weight:600;">Cargar Carta de Porte (PDF)</span>
+                         <span style="font-size:0.75rem; opacity:0.5; font-weight:normal;">(Pre-llena origen, destino, producto, pesos y más)</span>
+                     </label>
+                     <div style="display:flex; align-items:center; gap:10px; padding:12px; background:#f8f9fa; border:2px dashed #e0e0e0; border-radius:8px; transition:border-color 0.2s;">
+                         <input type="file" id="viaje-pdf-input" accept="application/pdf" style="display:none;">
+                         <button type="button" id="viaje-pdf-btn" class="btn-secondary" style="padding:8px 16px; font-size:0.85rem; border-radius:6px;">
+                             <i class="fas fa-upload"></i> Seleccionar PDF...
+                         </button>
+                         <span id="viaje-pdf-filename" style="font-size:0.8rem; opacity:0.7; max-width:250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
+                     </div>
+                     <div id="viaje-pdf-status" style="font-size:0.75rem; color:#666; margin-top:6px; min-height:18px;"></div>
+                 </div>
+
+                 <!-- Fila 5: Fecha + TN Estimadas (Peso Estimado) + Tarifa -->
+
+
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+
                     <div class="form-group">
-                        <label>Fecha de Carga <span class="req">*</span></label>
+                        <label>Fecha de Carga *</label>
                         <input type="date" name="fecha_carga" id="viaje-fecha-carga" class="input-field" required>
                     </div>
                     <div class="form-group">
-                        <label>TN Estimadas <span class="req">*</span></label>
+                        <label>TN Estimadas *</label>
                         <input type="number" step="0.01" min="0.01" name="peso_estimado" id="viaje-peso-estimado" class="input-field" required placeholder="0.00">
                     </div>
+
                     <div class="form-group">
-                        <label>Tarifa x TN ($) <span class="req">*</span></label>
+                        <label>Tarifa por TN ($) *</label>
                         <input type="number" step="0.01" min="0.01" name="tarifa_tonelada" id="viaje-tarifa" class="input-field" required placeholder="0.00">
                     </div>
                 </div>
 
                 <!-- Fila 6: Tipo Comisión + Valor + Comisionista -->
-                <div class="viaje-grid-3">
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 12px;">
                     <div class="form-group">
                         <label>Tipo Comisión</label>
                         <select name="comision_tipo" id="viaje-comision-tipo" class="input-field">
@@ -678,7 +716,7 @@ $viajes = $stmt->fetchAll();
                         </select>
                     </div>
                     <div class="form-group">
-                        <label>Valor</label>
+                        <label>Valor Comisión</label>
                         <input type="number" step="0.01" min="0" name="comision_valor" id="viaje-comision-valor" class="input-field" value="0">
                     </div>
                     <div class="form-group">
@@ -693,43 +731,30 @@ $viajes = $stmt->fetchAll();
                 </div>
 
                 <!-- Fila 7: Pagador de Flete -->
-                <div class="form-group" style="margin-bottom:8px;">
-                    <label>Pagador de Flete <span class="req">*</span></label>
-                    <select name="pagador_id" id="viaje-pagador" class="input-field" required>
-                        <option value="">-- Seleccionar --</option>
-                        <?php foreach($pagadores as $pg): ?>
-                            <option value="<?= (int)$pg['id'] ?>"><?= htmlspecialchars($pg['razon_social']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
+                <div style="display: grid; grid-template-columns: 1fr; gap: 12px;">
+                    <div class="form-group">
+                        <label>Pagador de Flete *</label>
+                        <select name="pagador_id" id="viaje-pagador" class="input-field" required>
+                            <option value="">-- Seleccionar --</option>
+                            <?php foreach($pagadores as $pg): ?>
+                                <option value="<?= (int)$pg['id'] ?>"><?= htmlspecialchars($pg['razon_social']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
                 </div>
 
-                <!-- Observaciones -->
-                <div class="form-group" style="margin-bottom:0;">
-                    <label>Observaciones</label>
-                    <textarea name="observaciones" id="viaje-observaciones" class="input-field" style="resize:vertical; min-height:44px;" placeholder="Notas adicionales..."></textarea>
+                <!-- Observaciones (opcional) -->
+                <div style="margin-top: 12px;">
+                    <div class="form-group">
+                        <label>Observaciones</label>
+                        <textarea name="observaciones" id="viaje-observaciones" class="input-field" style="resize:vertical; min-height:50px;" placeholder="Notas adicionales..."></textarea>
+                    </div>
                 </div>
 
             </div><!-- /modal-body -->
-            <div class="modal-footer" id="modal-viaje-footer" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
-                <div style="display: flex; align-items: center; gap: 8px; flex: 1;">
-                    <?php
-                    $puedeImportarCP = ($user_role === 'developer') || in_array('importar_carta_porte', $user_permissions);
-                    if ($puedeImportarCP):
-                    ?>
-                    <!-- Cargar Carta de Porte PDF -->
-                    <div style="background: rgba(52, 152, 219, 0.08); border: 2px dashed var(--accent, #3498db); border-radius: 8px; padding: 6px 12px; text-align: center; display: inline-flex; align-items: center;">
-                        <label for="pdf-cpe-input" style="cursor: pointer; margin: 0; font-size: 0.85rem; color: var(--accent, #3498db); font-weight: bold; display: flex; align-items: center; gap: 6px;">
-                            <i class="fas fa-file-pdf fa-lg"></i> Importar datos desde Carta de Porte PDF (AFIP)
-                        </label>
-                        <input type="file" id="pdf-cpe-input" accept="application/pdf" style="display: none;" onchange="procesarCartaPortePDF(this)">
-                        <div id="pdf-status" style="font-size: 0.8rem; margin-left: 8px; color: #555; display: none;"></div>
-                    </div>
-                    <?php endif; ?>
-                </div>
-                <div style="display: flex; gap: 8px; flex-shrink: 0;">
-                    <button type="button" class="btn-secondary" onclick="closeModal('modal-viaje')">Cancelar</button>
-                    <button type="submit" class="btn-primary"><i class="fas fa-save"></i> Guardar Viaje</button>
-                </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" onclick="closeModal('modal-viaje')">Cancelar</button>
+                <button type="submit" class="btn-primary"><i class="fas fa-save"></i> Guardar Viaje</button>
             </div>
         </form>
     </div>
@@ -737,6 +762,7 @@ $viajes = $stmt->fetchAll();
 
 <!-- Formulario oculto para borrar -->
 <form id="form-borrar-viaje" method="POST" style="display:none;">
+
     <input type="hidden" name="action" value="borrar">
     <input type="hidden" name="id" id="borrar-viaje-id">
 </form>
@@ -748,16 +774,10 @@ function prepararNuevoViaje() {
     document.getElementById('viaje-action').value = "nuevo";
     document.getElementById('viaje-id').value = "";
 
-    const pdfInput = document.getElementById('pdf-cpe-input');
-    if (pdfInput) pdfInput.value = '';
-    const pdfStatus = document.getElementById('pdf-status');
-    if (pdfStatus) {
-        pdfStatus.style.display = 'none';
-        pdfStatus.innerHTML = '';
-    }
-
+    // evitar que listeners pisen valores durante el reset
     window.__viaje_isInitializing = true;
 
+    // Reset del form (evitar .reset() por listeners/inputs inconsistentes)
     document.getElementById('viaje-fecha-carga').value = new Date().toISOString().split('T')[0];
     document.getElementById('viaje-peso-estimado').value = 0;
     document.getElementById('viaje-tarifa').value = 0;
@@ -785,20 +805,14 @@ function prepararNuevoViaje() {
     openModal('modal-viaje');
 }
 
+
 // ─── EDITAR VIAJE ───────────────────────────────────────
 function editViaje(data) {
     document.getElementById('viaje-modal-title').innerText = "Editar Viaje #" + data.id;
     document.getElementById('viaje-action').value = "editar";
     document.getElementById('viaje-id').value = data.id;
 
-    const pdfInput = document.getElementById('pdf-cpe-input');
-    if (pdfInput) pdfInput.value = '';
-    const pdfStatus = document.getElementById('pdf-status');
-    if (pdfStatus) {
-        pdfStatus.style.display = 'none';
-        pdfStatus.innerHTML = '';
-    }
-
+    // Evitar que listeners (vehiculo) pisen valores durante el set inicial
     window.__viaje_isInitializing = true;
 
     document.getElementById('viaje-cliente').value = data.cliente_id ?? '';
@@ -826,6 +840,7 @@ function editViaje(data) {
     document.getElementById('viaje-pagador').value = data.pagador_id || '';
     document.getElementById('viaje-observaciones').value = data.observaciones || '';
 
+    // Sin depender de change: recalcular porcentaje en base al chofer seteado
     const select = document.getElementById('viaje-chofer');
     const selectedOption = select.options[select.selectedIndex];
     const pct = selectedOption ? (parseFloat(selectedOption.getAttribute('data-porcentaje')) || 0) : 0;
@@ -835,6 +850,8 @@ function editViaje(data) {
     openModal('modal-viaje');
 }
 
+
+
 // ─── BORRAR VIAJE ───────────────────────────────────────
 function confirmarBorrarViaje(id, nombre) {
     appConfirm('¿Seguro que deseas eliminar el viaje "' + nombre + '"? (borrado lógico)', function() {
@@ -843,233 +860,11 @@ function confirmarBorrarViaje(id, nombre) {
     }, "Eliminar Viaje");
 }
 
-// ─── PROCESAR CARTA DE PORTE PDF (AFIP) OPTIMIZADO ───
-async function procesarCartaPortePDF(input) {
-    const file = input.files[0];
-    const statusDiv = document.getElementById('pdf-status');
-    if (!file) return;
-
-    statusDiv.style.display = 'block';
-    statusDiv.className = '';
-    statusDiv.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Procesando documento PDF...';
-
-    try {
-        const arrayBuffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-        let lines = [];
-
-        for (let i = 1; i <= pdf.numPages; i++) {
-            const page = await pdf.getPage(i);
-            const textContent = await page.getTextContent({ disableCombineTextItems: false });
-            
-            // Reconstrucción del layout por coordenadas Y
-            let lineMap = {};
-            textContent.items.forEach(item => {
-                if (!item.str || !item.str.trim()) return;
-                let y = Math.round(item.transform[5] / 4) * 4;
-                if (!lineMap[y]) lineMap[y] = [];
-                lineMap[y].push({ x: item.transform[4], text: item.str });
-            });
-
-            let sortedY = Object.keys(lineMap).sort((a, b) => b - a);
-            sortedY.forEach(y => {
-                lineMap[y].sort((a, b) => a.x - b.x);
-                lines.push(lineMap[y].map(item => item.text).join(' '));
-            });
-        }
-
-        const fullText = lines.join('\n');
-        const cleanText = fullText.replace(/[ \t]+/g, ' ');
-        const cleanUpper = cleanText.toUpperCase();
-
-        // ─── 1. CTG Y CARTA DE PORTE N° ───
-        let ctgNro = '';
-        let cpNro = '';
-
-        const ctgMatch = cleanText.match(/(?:CTG|C\.T\.G\.)\s*[:\.]?\s*(\d{8,12})/i) || cleanText.match(/\b\d{10,11}\b/);
-        if (ctgMatch) ctgNro = ctgMatch[1] || ctgMatch[0];
-
-        const cpMatch = cleanText.match(/(?:CARTA DE PORTE|CPE|N° DE CARTA DE PORTE|N° Solicitud|N°)\s*[:\.]?\s*(\d{4,5}[-\s]?\d{7,10}|\d{12,14})/i);
-        if (cpMatch) cpNro = cpMatch[1].replace(/[\s-]/g, '');
-
-        if (!ctgNro && cpNro) ctgNro = cpNro;
-        if (!cpNro && ctgNro) cpNro = ctgNro;
-
-        // ─── 2. PATENTES (Chasis y Acoplado) ───
-        const patentes = cleanUpper.match(/\b([A-Z]{2}\s*\d{3}\s*[A-Z]{2}|[A-Z]{3}\s*\d{3})\b/g) || [];
-        let chasis = patentes.length > 0 ? patentes[0].replace(/\s+/g, '') : '';
-        let acoplado = patentes.length > 1 ? patentes[1].replace(/\s+/g, '') : '';
-
-        // ─── 3. PRODUCTO / ESPECIE ───
-        let producto = '';
-        // Búsqueda directa de granos comunes primero
-        const granosComunes = ['SOJA', 'MAIZ', 'MAÍZ', 'TRIGO', 'GIRASOL', 'CEBADA', 'SORGO', 'AVENA', 'MANI', 'MANÍ', 'CENTENO', 'COLZA', 'ALGODON', 'ALGODÓN'];
-        for (let grano of granosComunes) {
-            if (cleanUpper.includes(grano)) {
-                producto = grano;
-                break;
-            }
-        }
-        // Si no se halló un grano clásico, intentar por expresión regular
-        if (!producto) {
-            const prodMatch = cleanText.match(/(?:Especie|Grano\/Especie|Producto)\s*[:\.]?\s*([A-ZÁÉÍÓÚÑ\s]{3,25})/i);
-            if (prodMatch) {
-                producto = prodMatch[1].replace(/(GRANO|COSECHA|TIPO|KG|PESO|CONTENEDOR|CALIDAD|ESTADO).*/i, '').trim();
-            }
-        }
-
-        // ─── 4. ORIGEN Y DESTINO (SECCIONES C Y D DE AFIP) ───
-        let origen = '';
-        let destino = '';
-
-        // Helper para extraer Localidad y Provincia dentro de un bloque de texto
-        function extraerUbicacion(bloqueTexto) {
-            if (!bloqueTexto) return '';
-
-            // Buscar Localidad (captura texto hasta encontrar "Provincia" o fin de línea)
-            let locMatch = bloqueTexto.match(/Localidad:\s*([A-ZÁÉÍÓÚÑ0-9\s\.\-']+?)(?=\s*Provincia|\s*Latitud|\s*Dirección|$)/i);
-            // Buscar Provincia
-            let provMatch = bloqueTexto.match(/Provincia:?\s*([A-ZÁÉÍÓÚÑ0-9\s\.\-']+?)(?=\s*Latitud|\s*Descripción|\s*E -|\s*D -|$)/i);
-
-            let loc = locMatch ? locMatch[1].trim() : '';
-            let prov = provMatch ? provMatch[1].trim() : '';
-
-            if (loc && prov) {
-                return `${loc} (${prov})`;
-            } else if (loc) {
-                return loc;
-            } else if (prov) {
-                return prov;
-            }
-            return '';
-        }
-
-        // 1. Aislar Sección C - PROCEDENCIA
-        const procIndex = cleanText.search(/C\s*-\s*PROCEDENCIA/i);
-        const destIndex = cleanText.search(/D\s*-\s*DESTINO/i);
-        const transIndex = cleanText.search(/E\s*-\s*DATOS DEL TRANSPORTE/i);
-
-        if (procIndex !== -1) {
-            let procText = '';
-            if (destIndex !== -1 && destIndex > procIndex) {
-                procText = cleanText.substring(procIndex, destIndex);
-            } else {
-                procText = cleanText.substring(procIndex, procIndex + 400);
-            }
-            origen = extraerUbicacion(procText);
-        }
-
-        // 2. Aislar Sección D - DESTINO DE LA MERCADERÍA
-        if (destIndex !== -1) {
-            let destText = '';
-            if (transIndex !== -1 && transIndex > destIndex) {
-                destText = cleanText.substring(destIndex, transIndex);
-            } else {
-                destText = cleanText.substring(destIndex, destIndex + 400);
-            }
-            destino = extraerUbicacion(destText);
-        }
-
-        // Respaldos por si el PDF no tuviera las letras C y D
-        if (!origen) {
-            let locOrig = cleanText.match(/Procedencia[\s\S]*?Localidad:\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*Provincia)/i);
-            if (locOrig) origen = locOrig[1].trim();
-        }
-        if (!destino) {
-            let locDest = cleanText.match(/DESTINO[\s\S]*?Localidad:\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*Provincia)/i);
-            if (locDest) destino = locDest[1].trim();
-        }
-
-        // ─── 5. PESO ESTIMADO (TN) ───
-        let pesoTN = 0;
-        const pesoMatch = cleanText.match(/(?:Peso Estimado|Kg Estimados|Neto Estimado|Kilos Cargados|Peso Neto|Declarado)\s*[:\.]?\s*([\d\.\,]+)/i)
-                       || cleanText.match(/(\d{2,5}[\.\,]\d{2})\s*(?:TN|Tns|Tons|Kg)/i);
-
-        if (pesoMatch) {
-            let numStr = pesoMatch[1].replace(/\./g, '').replace(',', '.');
-            let val = parseFloat(numStr);
-            if (!isNaN(val)) {
-                pesoTN = val > 500 ? (val / 1000) : val;
-            }
-        }
-
-        // ─── 6. TARIFA POR TONELADA ───
-        let tarifa = 0;
-        const tarifaMatch = cleanText.match(/(?:Tarifa|Flete Sugerido|Tarifa Reference|Tarifa\/TN|\$\/TN)\s*[:\.]?\s*\$?\s*([\d\.\,]+)/i);
-        if (tarifaMatch) {
-            let tStr = tarifaMatch[1].replace(/\./g, '').replace(',', '.');
-            let tVal = parseFloat(tStr);
-            if (!isNaN(tVal)) tarifa = tVal;
-        }
-
-        // ─── ASIGNACIÓN A CAMPOS DE FORMULARIO ───
-        if (ctgNro) document.getElementById('viaje-ctg').value = ctgNro;
-        if (cpNro) document.getElementById('viaje-carta-porte').value = cpNro;
-        if (acoplado) document.getElementById('viaje-acoplado').value = acoplado;
-        if (producto) document.getElementById('viaje-producto').value = producto;
-        if (origen) document.getElementById('viaje-origen').value = origen;
-        if (destino) document.getElementById('viaje-destino').value = destino;
-        if (pesoTN > 0) document.getElementById('viaje-peso-estimado').value = pesoTN.toFixed(2);
-        if (tarifa > 0) document.getElementById('viaje-tarifa').value = tarifa.toFixed(2);
-
-        // ─── MATCHEO DE CLIENTE Y PAGADOR DE FLETE ───
-        autoSelectFromText('viaje-cliente', cleanUpper);
-        autoSelectFromText('viaje-pagador', cleanUpper);
-
-        // Auto-selección inteligente de VEHÍCULO por patente
-        if (chasis) {
-            const vehiculoSelect = document.getElementById('viaje-vehiculo');
-            for (let option of vehiculoSelect.options) {
-                if (option.text.toUpperCase().includes(chasis)) {
-                    vehiculoSelect.value = option.value;
-                    vehiculoSelect.dispatchEvent(new Event('change'));
-                    break;
-                }
-            }
-        }
-
-        statusDiv.className = 'alert alert-success';
-        statusDiv.style.padding = '6px 10px';
-        statusDiv.innerHTML = '<i class="fas fa-check-circle"></i> ¡Datos del PDF extraídos correctamente!';
-
-    } catch (err) {
-        console.error(err);
-        statusDiv.className = 'alert alert-error';
-        statusDiv.style.padding = '6px 10px';
-        statusDiv.innerHTML = '<i class="fas fa-exclamation-triangle"></i> No se pudieron procesar los datos del PDF. Revisa el archivo.';
-    }
-}
-
-// Helper para matchear las opciones del <select> contra todo el texto extraído
-function autoSelectFromText(selectId, fullTextUpper) {
-    const select = document.getElementById(selectId);
-    if (!select) return;
-
-    for (let option of select.options) {
-        if (!option.value || option.value === "0") continue;
-
-        let label = option.text.toUpperCase();
-        let cuitDigits = label.replace(/\D/g, '');
-
-        // 1. Si la opción tiene CUIT (11 dígitos) y está en el PDF
-        if (cuitDigits.length >= 11 && fullTextUpper.includes(cuitDigits)) {
-            select.value = option.value;
-            return;
-        }
-
-        // 2. Coincidencia por Razón Social (nombre del cliente)
-        let cleanName = label.replace(/\([^)]*\)/g, '').trim();
-        if (cleanName.length > 3 && fullTextUpper.includes(cleanName)) {
-            select.value = option.value;
-            return;
-        }
-    }
-}
-
 // ─── INICIALIZACIÓN ─────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
     var isInit = () => !!window.__viaje_isInitializing;
 
+    // Al seleccionar vehículo → auto-asignar chofer y acoplado
     var vehiculoSelect = document.getElementById('viaje-vehiculo');
     if (vehiculoSelect) {
         vehiculoSelect.addEventListener('change', function() {
@@ -1080,14 +875,14 @@ document.addEventListener('DOMContentLoaded', function() {
             var acoplado = selectedOption.getAttribute('data-acoplado');
 
             document.getElementById('viaje-chofer').value = choferId || '0';
-            if (acoplado && !document.getElementById('viaje-acoplado').value) {
-                document.getElementById('viaje-acoplado').value = acoplado;
-            }
+            document.getElementById('viaje-acoplado').value = acoplado || '';
 
+            // Auto-completar porcentaje del chofer seleccionado
             actualizarPorcentajeChofer();
         });
     }
 
+    // Al cambiar el chofer manualmente → actualizar porcentaje
     var choferSelect = document.getElementById('viaje-chofer');
     if (choferSelect) {
         choferSelect.addEventListener('change', function() {
@@ -1101,5 +896,191 @@ document.addEventListener('DOMContentLoaded', function() {
         var pct = selectedOption ? (parseFloat(selectedOption.getAttribute('data-porcentaje')) || 0) : 0;
         document.getElementById('viaje-chofer-porcentaje').value = pct;
     }
+
+
 });
+
+// ─── CARGA DE CARTA DE PORTE PDF ────────────────────────
+// Incluye PDF.js desde CDN para extraer texto del PDF en el cliente
+document.addEventListener('DOMContentLoaded', function() {
+    initPdfSystem();
+
+    function initPdfSystem() {
+        var pdfInput = document.getElementById('viaje-pdf-input');
+        var pdfBtn = document.getElementById('viaje-pdf-btn');
+        var pdfFilename = document.getElementById('viaje-pdf-filename');
+        var pdfStatus = document.getElementById('viaje-pdf-status');
+
+        if (!pdfBtn || !pdfInput) return;
+
+        // Cargar PDF.js dinámicamente si no está disponible
+        if (typeof pdfjsLib === 'undefined') {
+            pdfStatus.innerHTML = '<span style="color:#666;">Cargando visor de PDF...</span>';
+            var script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.64/pdf.min.js';
+            script.onload = function() {
+                if (typeof pdfjsLib !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
+                    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.64/pdf.worker.min.js';
+                }
+                pdfStatus.innerHTML = '';
+                bindPdfEvents();
+            };
+            script.onerror = function() {
+                pdfStatus.innerHTML = '<span style="color:#e74c3c;">Error al cargar PDF.js. Recargue la página.</span>';
+            };
+            document.head.appendChild(script);
+        } else {
+            bindPdfEvents();
+        }
+
+        function bindPdfEvents() {
+            pdfBtn.addEventListener('click', function() {
+                pdfInput.click();
+            });
+
+            pdfInput.addEventListener('change', function(e) {
+                var file = e.target.files[0];
+                if (!file) return;
+
+                // Validar que sea PDF
+                if (file.type !== 'application/pdf') {
+                    pdfStatus.innerHTML = '<span style="color:#e74c3c;">El archivo debe ser un PDF.</span>';
+                    return;
+                }
+
+                // Mostrar nombre del archivo
+                pdfFilename.textContent = file.name;
+                pdfStatus.innerHTML = '<span style="color:#3498db;">Extrayendo texto del PDF...</span>';
+                pdfBtn.disabled = true;
+                pdfBtn.innerHTML = '<i class="fas fa-spinner fa-pulse"></i> Procesando...';
+
+                // Extraer texto con PDF.js
+                var fileReader = new FileReader();
+                fileReader.onload = function() {
+                    var typedArray = new Uint8Array(this.result);
+                    pdfjsLib.getDocument({ data: typedArray }).promise.then(function(pdf) {
+                        var numPages = pdf.numPages;
+                        var textPromises = [];
+                        for (var i = 1; i <= numPages; i++) {
+                            textPromises.push(pdf.getPage(i).then(function(page) {
+                                return page.getTextContent().then(function(textContent) {
+                                    return textContent.items.map(function(item) { return item.str; }).join('');
+                                });
+                            }));
+                        }
+                        return Promise.all(textPromises).then(function(pagesText) {
+                            return pagesText.join('\n');
+                        });
+                    }).then(function(rawText) {
+                        // Enviar texto extraído al endpoint de parseo
+                        pdfStatus.innerHTML = '<span style="color:#3498db;">Parseando Carta de Porte...</span>';
+                        return fetch('ajax_parse_carta_porte.php', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                            body: 'raw_text=' + encodeURIComponent(rawText)
+                        });
+                    }).then(function(response) {
+                        return response.json();
+                    }).then(function(data) {
+                        if (data.success && data.fields) {
+                            pdfStatus.innerHTML = '<span style="color:#27ae60;">✓ Carta de Porte parseada correctamente. Campos pre-llenados.</span>';
+                            prefillFromCartaPorte(data.fields);
+                        } else {
+                            pdfStatus.innerHTML = '<span style="color:#e74c3c;">Error: ' + (data.error || 'No se pudo parsear el PDF.') + '</span>';
+                        }
+                    }).catch(function(err) {
+                        pdfStatus.innerHTML = '<span style="color:#e74c3c;">Error al procesar el PDF: ' + err.message + '</span>';
+                    }).finally(function() {
+                        pdfBtn.disabled = false;
+                        pdfBtn.innerHTML = '<i class="fas fa-upload"></i> Seleccionar PDF...';
+                    });
+                };
+                fileReader.readAsArrayBuffer(file);
+            });
+        }
+    }
+
+
+    // ─── PRE-LLENAR CAMPOS DEL FORMULARIO ─────────────────
+    function prefillFromCartaPorte(fields) {
+        // CTG N°
+        if (fields.ctg_nro && !document.getElementById('viaje-ctg').value) {
+            document.getElementById('viaje-ctg').value = fields.ctg_nro;
+        }
+
+        // Carta Porte N°
+        if (fields.cpe_nro && !document.getElementById('viaje-carta-porte').value) {
+            document.getElementById('viaje-carta-porte').value = fields.cpe_nro;
+        }
+
+        // Origen
+        if (fields.origen && !document.getElementById('viaje-origen').value) {
+            document.getElementById('viaje-origen').value = fields.origen;
+        }
+
+        // Destino
+        if (fields.destino && !document.getElementById('viaje-destino').value) {
+            document.getElementById('viaje-destino').value = fields.destino;
+        }
+
+        // Producto
+        if (fields.producto && !document.getElementById('viaje-producto').value) {
+            document.getElementById('viaje-producto').value = fields.producto;
+        }
+
+        // TN Estimadas (peso neto en TN)
+        if (fields.peso_estimado_tn > 0 && !document.getElementById('viaje-peso-estimado').value) {
+            document.getElementById('viaje-peso-estimado').value = fields.peso_estimado_tn;
+        }
+
+        // Fecha de Carga (convertir DD/MM/YYYY → YYYY-MM-DD)
+        if (fields.fecha && !document.getElementById('viaje-fecha-carga').value) {
+            var parts = fields.fecha.split('/');
+            if (parts.length === 3) {
+                document.getElementById('viaje-fecha-carga').value = parts[2] + '-' + parts[0] + '-' + parts[1];
+            }
+        }
+
+        // Tarifa (solo si está vacío)
+        if (fields.tarifa > 0 && !document.getElementById('viaje-tarifa').value) {
+            document.getElementById('viaje-tarifa').value = fields.tarifa;
+        }
+
+        // Chofer (intentar hacer match por nombre)
+        if (fields.chofer_nombre) {
+            matchChoferByName(fields.chofer_nombre);
+        }
+
+        // Mostrar resumen de campos pre-llenados
+        var filledCount = 0;
+        var fieldsToCheck = ['viaje-ctg', 'viaje-carta-porte', 'viaje-origen', 'viaje-destino', 'viaje-producto', 'viaje-peso-estimado', 'viaje-fecha-carga', 'viaje-tarifa'];
+        fieldsToCheck.forEach(function(id) {
+            if (document.getElementById(id).value) filledCount++;
+        });
+        if (filledCount > 0) {
+            pdfStatus.innerHTML += ' (' + filledCount + ' campos completados)';
+        }
+    }
+
+    // ─── MATCH DE CHOFER POR NOMBRE ───────────────────────
+    function matchChoferByName(nombre) {
+        var select = document.getElementById('viaje-chofer');
+        if (!select) return;
+
+        var nombreLower = nombre.toLowerCase().trim();
+        var options = select.getElementsByTagName('option');
+
+        for (var i = 0; i < options.length; i++) {
+            var optText = options[i].text.toLowerCase().trim();
+            // Match parcial: "apellido, nombre" contiene "apellido" o "nombre"
+            if (optText.indexOf(nombreLower) !== -1 || nombreLower.indexOf(optText) !== -1) {
+                select.value = options[i].value;
+                // Actualizar porcentaje
+                var pct = parseFloat(options[i].getAttribute('data-porcentaje')) || 0;
+                document.getElementById('viaje-chofer-porcentaje').value = pct;
+                return;
+            }
+        }
+    }
+})();
 </script>

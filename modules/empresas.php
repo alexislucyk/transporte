@@ -10,8 +10,26 @@ $error = "";
 // --- HELPERS DE AUTORIZACIÓN (multi-tenant seguro) ---
 function empresaOwner(PDO $pdo, int $id, int $currentUserId, string $currentRole): bool {
     if ($currentRole === 'developer') return true;
+    
+    // Usar la misma lógica que index.php para determinar adminRootId
+    $adminRootId = $_SESSION['admin_root_id'] ?? null;
+    if (!$adminRootId) {
+        if ($currentRole === 'developer' || $currentRole === 'admin') {
+            // Developer y Admin son su propio root
+            $adminRootId = $currentUserId;
+        } else {
+            // Usuario normal: buscar el admin que lo creó
+            $stmtAdmin = $pdo->prepare("SELECT created_by FROM users WHERE id = ? AND role <> 'developer' LIMIT 1");
+            $stmtAdmin->execute([$currentUserId]);
+            $adminRootId = (int)($stmtAdmin->fetchColumn() ?: 0);
+            if (!$adminRootId) {
+                $adminRootId = $currentUserId;
+            }
+        }
+    }
+    
     $stmt = $pdo->prepare("SELECT id FROM transportistas WHERE id = ? AND created_by = ?");
-    $stmt->execute([$id, $currentUserId]);
+    $stmt->execute([$id, $adminRootId]);
     return (bool)$stmt->fetchColumn();
 }
 
@@ -28,13 +46,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     $email = trim($_POST['email'] ?? '');
 
     if ($_POST['action'] === 'nuevo') {
-        try {
-            $sql = "INSERT INTO transportistas (razon_social, cuit, direccion, telefono, email, created_by) VALUES (?, ?, ?, ?, ?, ?)";
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute([$razon_social, $cuit, $direccion, $telefono, $email, $currentUserId]);
-            $mensaje = "Empresa registrada exitosamente.";
-        } catch (PDOException $e) {
-            $error = ($e->getCode() == 23000) ? "Error: El CUIT ya existe." : "Error: " . $e->getMessage();
+        // Determinar el admin_root_id igual que en index.php para consistencia
+        $adminRootId = $_SESSION['admin_root_id'] ?? null;
+        if (!$adminRootId) {
+            $userRole = $_SESSION['user_role'] ?? 'user';
+            if ($userRole === 'developer' || $userRole === 'admin') {
+                // Developer y Admin son su propio root
+                $adminRootId = $currentUserId;
+            } else {
+                // Usuario normal: buscar el admin que lo creó
+                $stmtAdmin = $pdo->prepare("SELECT created_by FROM users WHERE id = ? AND role <> 'developer' LIMIT 1");
+                $stmtAdmin->execute([$currentUserId]);
+                $adminRootId = (int)($stmtAdmin->fetchColumn() ?: 0);
+                if (!$adminRootId) {
+                    $adminRootId = $currentUserId;
+                }
+            }
+        }
+        
+        // Verificar límite de empresas (solo para admins, no developer)
+        if ($currentRole !== 'developer') {
+            $check = verificarLimite($pdo, 'empresas', $adminRootId);
+            if (!$check['permitido']) {
+                $error = $check['mensaje'];
+            }
+        }
+        if (empty($error)) {
+            try {
+                $sql = "INSERT INTO transportistas (razon_social, cuit, direccion, telefono, email, created_by) VALUES (?, ?, ?, ?, ?, ?)";
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute([$razon_social, $cuit, $direccion, $telefono, $email, $adminRootId]);
+                $nuevaId = (int)$pdo->lastInsertId();
+                
+                // Registrar auditoría de creación
+                registrarAuditoria($pdo, $currentUserId, 'crear', 'empresas', 
+                    "Nueva empresa registrada: {$razon_social} (CUIT: {$cuit})",
+                    null,
+                    ['id' => $nuevaId, 'razon_social' => $razon_social, 'cuit' => $cuit, 'direccion' => $direccion, 'telefono' => $telefono, 'email' => $email]
+                );
+                
+                $mensaje = "Empresa registrada exitosamente.";
+            } catch (PDOException $e) {
+                $error = ($e->getCode() == 23000) ? "Error: El CUIT ya existe." : "Error: " . $e->getMessage();
+            }
         }
     }
 
@@ -44,8 +98,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $error = "No autorizado: la empresa no existe o pertenece a otro administrador.";
         } else {
             try {
+                // Obtener datos anteriores para auditoría
+                $stmtDatos = $pdo->prepare("SELECT razon_social, cuit, direccion, telefono, email FROM transportistas WHERE id = ?");
+                $stmtDatos->execute([$id]);
+                $datosAnteriores = $stmtDatos->fetch(PDO::FETCH_ASSOC);
+                
                 $sql = "UPDATE transportistas SET activo = 0 WHERE id=?";
                 $pdo->prepare($sql)->execute([$id]);
+                
+                // Registrar auditoría de eliminación
+                registrarAuditoria($pdo, $currentUserId, 'eliminar', 'empresas', 
+                    "Empresa eliminada (borrado lógico): " . ($datosAnteriores['razon_social'] ?? 'ID: ' . $id),
+                    $datosAnteriores,
+                    ['activo' => 0, 'tipo_eliminacion' => 'borrado_logico']
+                );
+                
                 $mensaje = "Empresa eliminada (borrado lógico) correctamente.";
             } catch (PDOException $e) {
                 $error = "Error al eliminar: " . $e->getMessage();
@@ -59,8 +126,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $error = "No autorizado: la empresa no existe o pertenece a otro administrador.";
         } else {
             try {
+                // Obtener datos anteriores para auditoría
+                $stmtDatos = $pdo->prepare("SELECT razon_social, cuit, direccion, telefono, email FROM transportistas WHERE id = ?");
+                $stmtDatos->execute([$id]);
+                $datosAnteriores = $stmtDatos->fetch(PDO::FETCH_ASSOC);
+                
                 $sql = "UPDATE transportistas SET razon_social=?, cuit=?, direccion=?, telefono=?, email=? WHERE id=?";
                 $pdo->prepare($sql)->execute([$razon_social, $cuit, $direccion, $telefono, $email, $id]);
+                
+                // Registrar auditoría de edición
+                registrarAuditoria($pdo, $currentUserId, 'editar', 'empresas', 
+                    "Empresa actualizada: " . ($datosAnteriores['razon_social'] ?? 'ID: ' . $id),
+                    $datosAnteriores,
+                    ['razon_social' => $razon_social, 'cuit' => $cuit, 'direccion' => $direccion, 'telefono' => $telefono, 'email' => $email]
+                );
+                
                 $mensaje = "Empresa actualizada correctamente.";
             } catch (PDOException $e) {
                 $error = "Error al actualizar: " . $e->getMessage();
@@ -74,8 +154,26 @@ if ($_SESSION['user_role'] === 'developer') {
     $stmt = $pdo->query("SELECT * FROM transportistas WHERE activo = 1 ORDER BY razon_social ASC");
     $empresas = $stmt->fetchAll();
 } else {
+    // Usar la misma lógica que index.php para determinar adminRootId
+    $adminRootId = $_SESSION['admin_root_id'] ?? null;
+    if (!$adminRootId) {
+        $userRole = $_SESSION['user_role'] ?? 'user';
+        if ($userRole === 'developer' || $userRole === 'admin') {
+            // Developer y Admin son su propio root
+            $adminRootId = $_SESSION['user_id'];
+        } else {
+            // Usuario normal: buscar el admin que lo creó
+            $stmtAdmin = $pdo->prepare("SELECT created_by FROM users WHERE id = ? AND role <> 'developer' LIMIT 1");
+            $stmtAdmin->execute([$_SESSION['user_id']]);
+            $adminRootId = (int)($stmtAdmin->fetchColumn() ?: 0);
+            if (!$adminRootId) {
+                $adminRootId = $_SESSION['user_id'];
+            }
+        }
+    }
+    
     $stmt = $pdo->prepare("SELECT * FROM transportistas WHERE created_by = ? AND activo = 1 ORDER BY razon_social ASC");
-    $stmt->execute([$_SESSION['user_id']]);
+    $stmt->execute([$adminRootId]);
     $empresas = $stmt->fetchAll();
 }
 ?>

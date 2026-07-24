@@ -30,16 +30,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         if ($dominio === '') {
             $error = "La patente del camion es obligatoria.";
         } else {
-            try {
-                $sql = "INSERT INTO vehiculos (transportista_id, dominio, marca, modelo, acoplado, anio, vtv_vencimiento, chofer_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
-                $stmt = $pdo->prepare($sql);
-                $stmt->execute([$active_company_id, $dominio, $marca, $modelo, $acoplado, ($anio > 0 ? $anio : null), ($vtv_vencimiento ?: null), ($chofer_id > 0 ? $chofer_id : null), $currentUserId]);
-                $mensaje = "Vehiculo registrado exitosamente.";
-            } catch (PDOException $e) {
-                if ($e->getCode() == 23000) {
-                    $error = "Error: ya existe un vehiculo con esa patente en esta empresa.";
+            // Determinar adminRootId para verificar límites
+            $adminRootId = $_SESSION['admin_root_id'] ?? null;
+            if (!$adminRootId) {
+                if ($currentRole === 'developer' || $currentRole === 'admin') {
+                    $adminRootId = $currentUserId;
                 } else {
-                    $error = "Error al registrar: " . $e->getMessage();
+                    $stmtAdmin = $pdo->prepare("SELECT created_by FROM users WHERE id = ? AND role <> 'developer' LIMIT 1");
+                    $stmtAdmin->execute([$currentUserId]);
+                    $adminRootId = (int)($stmtAdmin->fetchColumn() ?: 0);
+                    if (!$adminRootId) {
+                        $adminRootId = $currentUserId;
+                    }
+                }
+            }
+            
+            // Verificar límite de vehículos (solo para admins, no developer)
+            if ($currentRole !== 'developer') {
+                $check = verificarLimite($pdo, 'vehiculos', $adminRootId, $active_company_id);
+                if (!$check['permitido']) {
+                    $error = $check['mensaje'];
+                }
+            }
+            if (empty($error)) {
+                try {
+                    $sql = "INSERT INTO vehiculos (transportista_id, dominio, marca, modelo, acoplado, anio, vtv_vencimiento, chofer_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                    $stmt = $pdo->prepare($sql);
+                    $stmt->execute([$active_company_id, $dominio, $marca, $modelo, $acoplado, ($anio > 0 ? $anio : null), ($vtv_vencimiento ?: null), ($chofer_id > 0 ? $chofer_id : null), $currentUserId]);
+                    $nuevaId = (int)$pdo->lastInsertId();
+                    
+                    // Registrar auditoría de creación
+                    registrarAuditoria($pdo, $currentUserId, 'crear', 'vehiculos', 
+                        "Nuevo vehículo registrado: {$dominio} ({$marca} {$modelo})",
+                        null,
+                        ['id' => $nuevaId, 'dominio' => $dominio, 'marca' => $marca, 'modelo' => $modelo, 'acoplado' => $acoplado, 'anio' => $anio, 'chofer_id' => $chofer_id]
+                    );
+                    
+                    $mensaje = "Vehiculo registrado exitosamente.";
+                } catch (PDOException $e) {
+                    if ($e->getCode() == 23000) {
+                        $error = "Error: ya existe un vehiculo con esa patente en esta empresa.";
+                    } else {
+                        $error = "Error al registrar: " . $e->getMessage();
+                    }
                 }
             }
         }
@@ -53,9 +86,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $error = "La patente es obligatoria.";
         } else {
             try {
+                // Obtener datos anteriores para auditoría
+                $stmtDatos = $pdo->prepare("SELECT dominio, marca, modelo, acoplado, anio, chofer_id FROM vehiculos WHERE id = ?");
+                $stmtDatos->execute([$id]);
+                $datosAnteriores = $stmtDatos->fetch(PDO::FETCH_ASSOC);
+                
                 $sql = "UPDATE vehiculos SET dominio=?, marca=?, modelo=?, acoplado=?, anio=?, vtv_vencimiento=?, chofer_id=? WHERE id=?";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([$dominio, $marca, $modelo, $acoplado, ($anio > 0 ? $anio : null), ($vtv_vencimiento ?: null), ($chofer_id > 0 ? $chofer_id : null), $id]);
+                
+                // Registrar auditoría de edición
+                registrarAuditoria($pdo, $currentUserId, 'editar', 'vehiculos', 
+                    "Vehículo actualizado: {$dominio} (ID: {$id})",
+                    $datosAnteriores,
+                    ['dominio' => $dominio, 'marca' => $marca, 'modelo' => $modelo, 'acoplado' => $acoplado, 'anio' => $anio, 'vtv_vencimiento' => $vtv_vencimiento, 'chofer_id' => $chofer_id]
+                );
+                
                 $mensaje = "Vehiculo actualizado correctamente.";
             } catch (PDOException $e) {
                 if ($e->getCode() == 23000) {
@@ -73,7 +119,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $error = "No autorizado.";
         } else {
             try {
+                // Obtener datos anteriores para auditoría
+                $stmtDatos = $pdo->prepare("SELECT dominio, marca, modelo FROM vehiculos WHERE id = ?");
+                $stmtDatos->execute([$id]);
+                $datosAnteriores = $stmtDatos->fetch(PDO::FETCH_ASSOC);
+                
                 $pdo->prepare("UPDATE vehiculos SET activo = 0 WHERE id = ?")->execute([$id]);
+                
+                // Registrar auditoría de eliminación
+                registrarAuditoria($pdo, $currentUserId, 'eliminar', 'vehiculos', 
+                    "Vehículo eliminado (borrado lógico): " . ($datosAnteriores['dominio'] ?? 'ID: ' . $id),
+                    $datosAnteriores,
+                    ['activo' => 0, 'tipo_eliminacion' => 'borrado_logico']
+                );
+                
                 $mensaje = "Vehiculo eliminado (borrado logico).";
             } catch (PDOException $e) {
                 $error = "Error al eliminar: " . $e->getMessage();

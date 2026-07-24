@@ -32,16 +32,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         if ($nombre === '' || $apellido === '') {
             $error = "Nombre y Apellido son obligatorios.";
         } else {
-            try {
-                $sql = "INSERT INTO choferes (transportista_id, nombre, apellido, cuil, telefono, porcentaje_ganancia, licencia_nro, vencimiento_licencia, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
-                $stmt = $pdo->prepare($sql);
-                $stmt->execute([$active_company_id, $nombre, $apellido, $cuil ?: null, $telefono ?: null, $porcentaje_ganancia, $licencia_nro ?: null, $vencimiento_licencia ?: null, $currentUserId]);
-                $mensaje = "Chofer registrado exitosamente.";
-            } catch (PDOException $e) {
-                if ($e->getCode() == 23000) {
-                    $error = "Error: ya existe un chofer con ese CUIL en esta empresa.";
+            // Determinar adminRootId para verificar límites
+            $adminRootId = $_SESSION['admin_root_id'] ?? null;
+            if (!$adminRootId) {
+                if ($currentRole === 'developer' || $currentRole === 'admin') {
+                    $adminRootId = $currentUserId;
                 } else {
-                    $error = "Error al registrar: " . $e->getMessage();
+                    $stmtAdmin = $pdo->prepare("SELECT created_by FROM users WHERE id = ? AND role <> 'developer' LIMIT 1");
+                    $stmtAdmin->execute([$currentUserId]);
+                    $adminRootId = (int)($stmtAdmin->fetchColumn() ?: 0);
+                    if (!$adminRootId) {
+                        $adminRootId = $currentUserId;
+                    }
+                }
+            }
+            
+            // Verificar límite de choferes (solo para admins, no developer)
+            if ($currentRole !== 'developer') {
+                $check = verificarLimite($pdo, 'choferes', $adminRootId, $active_company_id);
+                if (!$check['permitido']) {
+                    $error = $check['mensaje'];
+                }
+            }
+            if (empty($error)) {
+                try {
+                    $sql = "INSERT INTO choferes (transportista_id, nombre, apellido, cuil, telefono, porcentaje_ganancia, licencia_nro, vencimiento_licencia, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                    $stmt = $pdo->prepare($sql);
+                    $stmt->execute([$active_company_id, $nombre, $apellido, $cuil ?: null, $telefono ?: null, $porcentaje_ganancia, $licencia_nro ?: null, $vencimiento_licencia ?: null, $currentUserId]);
+                    $nuevaId = (int)$pdo->lastInsertId();
+                    
+                    // Registrar auditoría de creación
+                    registrarAuditoria($pdo, $currentUserId, 'crear', 'choferes', 
+                        "Nuevo chofer registrado: {$apellido}, {$nombre} (CUIL: {$cuil})",
+                        null,
+                        ['id' => $nuevaId, 'nombre' => $nombre, 'apellido' => $apellido, 'cuil' => $cuil, 'telefono' => $telefono, 'porcentaje_ganancia' => $porcentaje_ganancia]
+                    );
+                    
+                    $mensaje = "Chofer registrado exitosamente.";
+                } catch (PDOException $e) {
+                    if ($e->getCode() == 23000) {
+                        $error = "Error: ya existe un chofer con ese CUIL en esta empresa.";
+                    } else {
+                        $error = "Error al registrar: " . $e->getMessage();
+                    }
                 }
             }
         }
@@ -55,9 +88,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $error = "Nombre y Apellido son obligatorios.";
         } else {
             try {
+                // Obtener datos anteriores para auditoría
+                $stmtDatos = $pdo->prepare("SELECT nombre, apellido, cuil, telefono, porcentaje_ganancia, licencia_nro, vencimiento_licencia FROM choferes WHERE id = ?");
+                $stmtDatos->execute([$id]);
+                $datosAnteriores = $stmtDatos->fetch(PDO::FETCH_ASSOC);
+                
                 $sql = "UPDATE choferes SET nombre=?, apellido=?, cuil=?, telefono=?, porcentaje_ganancia=?, licencia_nro=?, vencimiento_licencia=? WHERE id=?";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([$nombre, $apellido, $cuil ?: null, $telefono ?: null, $porcentaje_ganancia, $licencia_nro ?: null, $vencimiento_licencia ?: null, $id]);
+                
+                // Registrar auditoría de edición
+                registrarAuditoria($pdo, $currentUserId, 'editar', 'choferes', 
+                    "Chofer actualizado: " . ($datosAnteriores['apellido'] ?? '') . ", " . ($datosAnteriores['nombre'] ?? '') . " (ID: {$id})",
+                    $datosAnteriores,
+                    ['nombre' => $nombre, 'apellido' => $apellido, 'cuil' => $cuil, 'telefono' => $telefono, 'porcentaje_ganancia' => $porcentaje_ganancia, 'licencia_nro' => $licencia_nro, 'vencimiento_licencia' => $vencimiento_licencia]
+                );
+                
                 $mensaje = "Chofer actualizado correctamente.";
             } catch (PDOException $e) {
                 if ($e->getCode() == 23000) {
@@ -75,7 +121,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $error = "No autorizado: el chofer no existe o pertenece a otro tenant.";
         } else {
             try {
+                // Obtener datos anteriores para auditoría
+                $stmtDatos = $pdo->prepare("SELECT nombre, apellido, cuil, telefono FROM choferes WHERE id = ?");
+                $stmtDatos->execute([$id]);
+                $datosAnteriores = $stmtDatos->fetch(PDO::FETCH_ASSOC);
+                
                 $pdo->prepare("UPDATE choferes SET activo = 0 WHERE id = ?")->execute([$id]);
+                
+                // Registrar auditoría de eliminación
+                registrarAuditoria($pdo, $currentUserId, 'eliminar', 'choferes', 
+                    "Chofer eliminado (borrado lógico): " . ($datosAnteriores['apellido'] ?? '') . ", " . ($datosAnteriores['nombre'] ?? '') . " (ID: {$id})",
+                    $datosAnteriores,
+                    ['activo' => 0, 'tipo_eliminacion' => 'borrado_logico']
+                );
+                
                 $mensaje = "Chofer eliminado (borrado logico).";
             } catch (PDOException $e) {
                 $error = "Error al eliminar: " . $e->getMessage();

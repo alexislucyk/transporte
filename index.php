@@ -13,6 +13,52 @@ require_once 'core/env.php';
 require_once 'config/db.php';
 require_once 'core/helpers.php';
 
+// ─── EARLY AJAX HANDLER: Guardar límites de admin ──
+// Se procesa ANTES de generar cualquier HTML para evitar contaminar la respuesta JSON
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['guardar_limites_admin']) && isset($_POST['ajax']) && $_POST['ajax'] == 1) {
+    // Limpiar todos los buffers de salida
+    while (ob_get_level() > 0) { ob_end_clean(); }
+    header('Content-Type: application/json');
+    
+    $isDev = ($_SESSION['user_role'] ?? '') === 'developer';
+    if (!$isDev) {
+        echo json_encode(['success' => false, 'error' => "Solo el desarrollador puede configurar límites."]);
+        exit;
+    }
+    
+    $admin_id = (int)($_POST['admin_id'] ?? 0);
+    if ($admin_id <= 0) {
+        echo json_encode(['success' => false, 'error' => "ID de administrador inválido."]);
+        exit;
+    }
+    
+    $nuevo_limite_empresas  = max(0, (int)($_POST['limite_empresas'] ?? 0));
+    $nuevo_limite_vehiculos = max(0, (int)($_POST['limite_vehiculos'] ?? 0));
+    $nuevo_limite_choferes  = max(0, (int)($_POST['limite_choferes'] ?? 0));
+    
+    try {
+        $pdo->prepare("
+            INSERT INTO admin_limites (admin_id, limite_empresas, limite_vehiculos, limite_choferes)
+            VALUES (?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                limite_empresas = VALUES(limite_empresas),
+                limite_vehiculos = VALUES(limite_vehiculos),
+                limite_choferes = VALUES(limite_choferes)
+        ")->execute([$admin_id, $nuevo_limite_empresas, $nuevo_limite_vehiculos, $nuevo_limite_choferes]);
+        
+        echo json_encode([
+            'success' => true,
+            'mensaje' => 'Límites actualizados correctamente.',
+            'admin_id' => $admin_id,
+            'limite_empresas' => $nuevo_limite_empresas,
+            'limite_vehiculos' => $nuevo_limite_vehiculos,
+            'limite_choferes' => $nuevo_limite_choferes
+        ]);
+    } catch (PDOException $e) {
+        echo json_encode(['success' => false, 'error' => "Error al guardar límites: " . $e->getMessage()]);
+    }
+    exit;
+}
 
 // --- PROTECCIÓN DE ACCESO ---
 if (!isset($_SESSION['user_id']) && !strpos($_SERVER['PHP_SELF'], 'login.php')) {
@@ -20,7 +66,21 @@ if (!isset($_SESSION['user_id']) && !strpos($_SERVER['PHP_SELF'], 'login.php')) 
     exit;
 }
 $user_role = $_SESSION['user_role'] ?? 'user';
-$user_permissions = $_SESSION['user_permissions'] ?? [];
+
+// Recargar permisos desde la BD en cada request para reflejar cambios hechos por el developer
+// (excepto developer que tiene acceso total)
+if ($user_role !== 'developer') {
+    try {
+        $stmtPerms = $pdo->prepare("SELECT module FROM user_permissions WHERE user_id = ?");
+        $stmtPerms->execute([$_SESSION['user_id']]);
+        $user_permissions = $stmtPerms->fetchAll(PDO::FETCH_COLUMN);
+        $_SESSION['user_permissions'] = $user_permissions;
+    } catch (PDOException $e) {
+        $user_permissions = $_SESSION['user_permissions'] ?? [];
+    }
+} else {
+    $user_permissions = $_SESSION['user_permissions'] ?? [];
+}
 
 // Determinar la ruta base para que los enlaces relativos funcionen correctamente
 $base_path = str_replace('index.php', '', $_SERVER['SCRIPT_NAME']);
@@ -34,6 +94,10 @@ if (empty($route) || $route === 'index.php') $route = 'dashboard';
 
 // --- MANEJO DE CIERRE DE SESIÓN ---
 if ($route === 'logout') {
+    // Registrar auditoría de logout
+    if (isset($_SESSION['user_id'])) {
+        registrarAuditoria($pdo, $_SESSION['user_id'], 'logout', 'auth', 'Cierre de sesión del usuario');
+    }
     $_SESSION = []; // Limpia las variables de sesión
     session_destroy(); // Destruye la sesión
     header("Location: " . $base_path . "login.php");
@@ -59,17 +123,21 @@ if ($user_role === 'developer') {
 } else {
     $adminRootId = $_SESSION['admin_root_id'] ?? null;
 
-    // Fallback: si no existe admin_root_id, para usuarios NO-developer asumimos
-    // que sus empresas están creadas por el admin que figura en users.created_by.
+    // Fallback: si no existe admin_root_id en sesión, calcularlo
     if (!$adminRootId) {
-        $stmtAdmin = $pdo->prepare("SELECT created_by FROM users WHERE id = ? AND role <> 'developer' LIMIT 1");
-        $stmtAdmin->execute([$_SESSION['user_id']]);
-        $adminRootId = (int)($stmtAdmin->fetchColumn() ?: 0);
-    }
-
-    if (!$adminRootId) {
-        // Último fallback (comportamiento anterior): usar el user_id como created_by.
-        $adminRootId = $_SESSION['user_id'];
+        $userRole = $_SESSION['user_role'] ?? 'user';
+        if ($userRole === 'developer' || $userRole === 'admin') {
+            // Developer y Admin son su propio root
+            $adminRootId = $_SESSION['user_id'];
+        } else {
+            // Usuario normal: buscar el admin que lo creó
+            $stmtAdmin = $pdo->prepare("SELECT created_by FROM users WHERE id = ? AND role <> 'developer' LIMIT 1");
+            $stmtAdmin->execute([$_SESSION['user_id']]);
+            $adminRootId = (int)($stmtAdmin->fetchColumn() ?: 0);
+            if (!$adminRootId) {
+                $adminRootId = $_SESSION['user_id'];
+            }
+        }
     }
 
     $stmt_trans = $pdo->prepare("SELECT id, razon_social FROM transportistas WHERE created_by = ? ORDER BY razon_social ASC");
@@ -93,7 +161,16 @@ if (isset($_POST['set_active_company'])) {
     }
 
     if ($is_allowed) {
+        $empresaAnterior = $todas_empresas[array_search($requested_id, array_column($todas_empresas, 'id'))]['razon_social'] ?? 'Ninguna';
         $_SESSION['active_company_id'] = $requested_id;
+        
+        // Registrar auditoría de cambio de empresa
+        $empresaNueva = $todas_empresas[array_search($requested_id, array_column($todas_empresas, 'id'))]['razon_social'] ?? 'Desconocida';
+        registrarAuditoria($pdo, $_SESSION['user_id'] ?? null, 'cambiar_empresa', 'empresas', 
+            "Cambio de empresa activa de '{$empresaAnterior}' a '{$empresaNueva}'",
+            ['empresa_anterior_id' => $active_company_id, 'empresa_anterior_nombre' => $empresaAnterior],
+            ['empresa_nueva_id' => $requested_id, 'empresa_nueva_nombre' => $empresaNueva]
+        );
     }
     header("Location: " . $base_path . ($route ?: 'dashboard'));
     exit;
@@ -138,15 +215,31 @@ $titles = [
     'empresas' => 'Gestión de Empresas',
     'mantenimiento' => 'Mantenimiento de Flota',
     'configuracion' => 'Configuración del Sistema',
-    'tesoreria' => 'Tesorería y Conciliación'
+    'config_permisos_usuarios' => 'Permisos de Usuarios',
+    'cuentas' => 'Cuentas',
+    'auditoria' => 'Registro de Auditoría'
 ];
 $pageTitle = $titles[$module] ?? 'Sistema de Transporte';
 
 // --- CONTROL DE PERMISOS POR ROL ---
 $access_denied = false;
-// El administrador tiene acceso total. Los usuarios normales solo a lo permitido en su lista.
-if (!in_array($user_role, ['admin', 'developer']) && $module !== 'dashboard') {
-    if (!in_array($module, $user_permissions)) {
+// El developer tiene acceso total. Admin y user respetan los permisos configurados.
+if ($user_role !== 'developer' && $module !== 'dashboard') {
+    // Sub-módulos heredan permiso del módulo padre
+    $modulos_padre = [
+        'viajes_detalle'             => 'viajes',
+        'choferes_ctacte'            => 'choferes',
+        'choferes_liquidar'          => 'choferes',
+        'cobranzas_fletes_pendientes'=> 'cobranzas',
+        'cobranzas_fletes_liquidar'  => 'cobranzas',
+        'cobranzas_fletes_factura'   => 'cobranzas',
+        'cobranzas_fletes_factura_lote' => 'cobranzas',
+        'cobranzas_fletes_cobro_lote'=> 'cobranzas',
+        'comisionistas_ctacte'       => 'comisionistas',
+        'config_permisos_usuarios'   => 'configuracion',
+    ];
+    $modulo_check = $modulos_padre[$module] ?? $module;
+    if (!in_array($modulo_check, $user_permissions)) {
         $access_denied = true;
         $pageTitle = "Acceso Restringido";
     }
@@ -156,6 +249,7 @@ if (!in_array($user_role, ['admin', 'developer']) && $module !== 'dashboard') {
 <html lang="es">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <base href="<?= $base_path ?>">
     <title><?= $pageTitle ?> - Trans Cargo Hub</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
@@ -245,19 +339,31 @@ if (!in_array($user_role, ['admin', 'developer']) && $module !== 'dashboard') {
             case 'cobranzas_fletes_factura':
                 include_once 'modules/cobranzas_fletes_factura.php';
                 break;
+            case 'cobranzas_fletes_factura_lote':
+                include_once 'modules/cobranzas_fletes_factura_lote.php';
+                break;
+            case 'cobranzas_fletes_cobro_lote':
+                include_once 'modules/cobranzas_fletes_cobro_lote.php';
+                break;
             case 'mantenimiento':
                 include_once 'modules/mantenimiento.php';
                 break;
-            case 'configuracion':
-                include_once 'modules/configuracion.php';
-                break;
-            case 'tesoreria':
-                include_once 'modules/tesoreria.php';
-                break;
-            default:
-                echo "<h1>404</h1><p>Módulo no encontrado.</p>";
-                break;
-        }
+    case 'configuracion':
+        include_once 'modules/configuracion.php';
+        break;
+    case 'config_permisos_usuarios':
+        include_once 'modules/config_permisos_usuarios.php';
+        break;
+    case 'cuentas':
+        include_once 'modules/cuentas.php';
+        break;
+    case 'auditoria':
+        include_once 'modules/auditoria.php';
+        break;
+    default:
+        echo "<h1>404</h1><p>Módulo no encontrado.</p>";
+        break;
+}
         endif;
         ?>
     </main>

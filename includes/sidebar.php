@@ -36,7 +36,15 @@
         <?php
         // Función para renderizar item del menú si tiene permiso
         function navItem($mod, $icon, $label, $current, $role, $perms) {
-            if (in_array($role, ['admin', 'developer']) || in_array($mod, $perms)) {
+            $hasAccess = false;
+            if ($role === 'developer') {
+                $hasAccess = true;
+            } elseif ($mod === 'dashboard') {
+                $hasAccess = true;
+            } elseif (in_array($mod, $perms)) {
+                $hasAccess = true;
+            }
+            if ($hasAccess) {
                 $active = ($current == $mod) ? 'active' : '';
                 echo "<a href=\"$mod\" class=\"nav-item $active\"><i class=\"fas $icon\"></i> <span>$label</span></a>";
             }
@@ -50,7 +58,7 @@
         navItem('vehiculos', 'fa-truck', 'Vehículos', $module, $user_role, $user_permissions);
         navItem('clientes', 'fa-building', 'Clientes', $module, $user_role, $user_permissions);
         navItem('mantenimiento', 'fa-tools', 'Mantenimiento', $module, $user_role, $user_permissions);
-        navItem('tesoreria', 'fa-university', 'Tesorería', $module, $user_role, $user_permissions);
+        navItem('cuentas', 'fa-wallet', 'Cuentas', $module, $user_role, $user_permissions);
         ?>
     </nav>
 
@@ -58,6 +66,12 @@
         <?php
         navItem('empresas', 'fa-industry', 'Empresas', $module, $user_role, $user_permissions);
         navItem('configuracion', 'fa-cog', 'Configuración', $module, $user_role, $user_permissions);
+        
+        // Solo mostrar el enlace de auditoría para el rol developer
+        if ($user_role === 'developer') {
+            $active = ($module == 'auditoria') ? 'active' : '';
+            echo "<a href=\"auditoria\" class=\"nav-item $active\"><i class=\"fas fa-clipboard-list\"></i> <span>Auditoría</span></a>";
+        }
         ?>
         <a href="logout.php" class="nav-item" style="color: #e74c3c;">
             <i class="fas fa-sign-out-alt"></i> <span>Cerrar Sesión</span>

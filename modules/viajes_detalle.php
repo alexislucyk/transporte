@@ -10,6 +10,7 @@ $error = "";
 $active_company_id = $_SESSION['active_company_id'] ?? 0;
 $currentRole = $_SESSION['user_role'] ?? 'user';
 $viaje_id = (int)($_GET['viaje_id'] ?? 0);
+$fromCobranzas = ($_GET['from'] ?? '') === 'cobranzas';
 
 // ─── HELPERS ──────────────────────────────────────────────
 function viajeOwner(PDO $pdo, int $id, int $tenantId, string $currentRole): bool {
@@ -62,21 +63,35 @@ if (!$viaje) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $action = $_POST['action'] ?? '';
-    $estadoEditable = ($viaje['estado'] === 'en_viaje');
+$estadoEditable = ($viaje['estado'] === 'en_viaje');
+$puedeEditarGastosAdelantos = $estadoEditable || ($fromCobranzas && in_array($viaje['estado'], ['descargado', 'facturado', 'cobrado']));
 
-    // Cuando ya fue descargado, TODO lo restante es solo consulta desde /cobranzas:
+    // Cuando ya fue descargado:
+    // - Desde Viajes: solo consulta
+    // - Desde Cobranzas: permite agregar/borrar gastos y adelantos (no descargar/facturar/cobrar)
     if (!$estadoEditable) {
         $accionesModificacion = [
             'descargar',
             'facturar',
             'cobrar',
+        ];
+        $accionesGastosAdelantos = [
             'agregar_gasto',
             'borrar_gasto',
             'agregar_adelanto',
             'borrar_adelanto'
         ];
+        // Siempre bloquear descargar/facturar/cobrar si no es en_viaje
         if (in_array($action, $accionesModificacion, true)) {
-            $error = 'En Viajes solo se permite consulta luego de descargar. Continuar el proceso desde Cobranzas.';
+            $error = 'Acción no permitida en este estado. Continuar el proceso desde Cobranzas.';
+            echo '<div class="alert alert-error"><i class="fas fa-exclamation-triangle"></i> ' . htmlspecialchars($error) . '</div>';
+            $mensaje = "";
+            $action = '';
+            $_POST = [];
+        }
+        // Gastos/adelantos: permitir solo si viene de Cobranzas
+        if (in_array($action, $accionesGastosAdelantos, true) && !$fromCobranzas) {
+            $error = 'En Viajes solo se permite consulta luego de descargar. Utilice Cobranzas para agregar gastos o adelantos.';
             echo '<div class="alert alert-error"><i class="fas fa-exclamation-triangle"></i> ' . htmlspecialchars($error) . '</div>';
             $mensaje = "";
             $action = '';
@@ -85,7 +100,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     // ─── AGREGAR GASTO ─────────────────────────────────
-    if ($estadoEditable && $action === 'agregar_gasto') {
+    if ($puedeEditarGastosAdelantos && $action === 'agregar_gasto') {
         $tipo_gasto   = $_POST['tipo_gasto'] ?? '';
         $monto        = (float)($_POST['monto'] ?? 0);
         $descripcion  = trim($_POST['descripcion'] ?? '');
@@ -106,7 +121,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     // ─── AGREGAR ADELANTO ─────────────────────────────
-    if ($estadoEditable && $action === 'agregar_adelanto') {
+    if ($puedeEditarGastosAdelantos && $action === 'agregar_adelanto') {
         $monto_adelanto = (float)($_POST['monto_adelanto'] ?? 0);
         $metodo_pago    = trim($_POST['metodo_pago'] ?? '');
         $fecha_adelanto = $_POST['fecha_adelanto'] ?? date('Y-m-d');
@@ -262,7 +277,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     // ─── BORRAR GASTO ──────────────────────────────────
-    if ($estadoEditable && $action === 'borrar_gasto') {
+    if ($puedeEditarGastosAdelantos && $action === 'borrar_gasto') {
         $gasto_id = (int)($_POST['gasto_id'] ?? 0);
         if ($gasto_id > 0) {
             try {
@@ -275,7 +290,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     // ─── BORRAR ADELANTO ───────────────────────────────
-    if ($estadoEditable && $action === 'borrar_adelanto') {
+    if ($puedeEditarGastosAdelantos && $action === 'borrar_adelanto') {
         $adelanto_id = (int)($_POST['adelanto_id'] ?? 0);
         if ($adelanto_id > 0) {
             try {
@@ -367,6 +382,7 @@ $estado_badge = match($viaje['estado']) {
 };
 
 $estadoEditable = ($viaje['estado'] === 'en_viaje');
+$puedeEditarGastosAdelantos = $estadoEditable || ($fromCobranzas && in_array($viaje['estado'], ['descargado', 'facturado', 'cobrado']));
 ?>
 <div id="viajes_detalle-page" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
     <div>
@@ -633,7 +649,7 @@ $estadoEditable = ($viaje['estado'] === 'en_viaje');
 <div class="card" style="margin-bottom:20px;">
     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:16px;">
         <h3 style="margin:0;"><i class="fas fa-receipt"></i> Gastos del Viaje</h3>
-        <?php if ($estadoEditable): ?>
+        <?php if ($puedeEditarGastosAdelantos): ?>
         <button onclick="openModal('modal-gasto')" class="btn-primary btn-sm"><i class="fas fa-plus"></i> Agregar Gasto</button>
         <?php endif; ?>
     </div>
@@ -677,7 +693,7 @@ $estadoEditable = ($viaje['estado'] === 'en_viaje');
                     <td><?= $badge_pagado ?></td>
                     <td style="text-align:right; font-weight:bold;">$ <?= number_format((float)$g['monto'], 2, ',', '.') ?></td>
                     <td style="text-align:center;">
-                        <?php if ($estadoEditable): ?>
+                        <?php if ($puedeEditarGastosAdelantos): ?>
                         <form method="POST" style="display:inline;" onsubmit="return appConfirm('¿Eliminar este gasto?', function(){ this.submit(); }.bind(this), 'Eliminar Gasto', this)" >
                             <input type="hidden" name="action" value="borrar_gasto">
                             <input type="hidden" name="gasto_id" value="<?= (int)$g['id'] ?>">
@@ -703,7 +719,7 @@ $estadoEditable = ($viaje['estado'] === 'en_viaje');
 <div class="card" style="margin-bottom:20px;">
     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:16px;">
         <h3 style="margin:0;"><i class="fas fa-hand-holding-usd"></i> Adelantos al Chofer</h3>
-        <?php if ($estadoEditable): ?>
+        <?php if ($puedeEditarGastosAdelantos): ?>
         <button onclick="openModal('modal-adelanto')" class="btn-primary btn-sm" style="background:#e67e22;"><i class="fas fa-plus"></i> Agregar Adelanto</button>
         <?php endif; ?>
     </div>
@@ -728,7 +744,7 @@ $estadoEditable = ($viaje['estado'] === 'en_viaje');
                     <td><?= htmlspecialchars($a['metodo_pago'] ?? '-') ?></td>
                     <td style="text-align:right; font-weight:bold;">$ <?= number_format((float)$a['monto'], 2, ',', '.') ?></td>
                     <td style="text-align:center;">
-                        <?php if ($estadoEditable): ?>
+                        <?php if ($puedeEditarGastosAdelantos): ?>
                         <form method="POST" style="display:inline;" onsubmit="return appConfirm('¿Eliminar este adelanto?', function(){ this.submit(); }.bind(this), 'Eliminar Adelanto')" >
                             <input type="hidden" name="action" value="borrar_adelanto">
                             <input type="hidden" name="adelanto_id" value="<?= (int)$a['id'] ?>">
@@ -758,7 +774,7 @@ $estadoEditable = ($viaje['estado'] === 'en_viaje');
 </div>
 <?php endif; ?>
 
-<?php if ($estadoEditable): ?>
+<?php if ($puedeEditarGastosAdelantos): ?>
 <div id="modal-gasto" class="modal">
     <div class="modal-content" style="max-width:500px;">
         <div class="modal-header">

@@ -6,3 +6,7 @@
 
 .table-container { overflow-x: auto; }
 
+/* Fijar ancho de columnas en tablas de cuentas para alineación entre cards */
+.cuentas-table { table-layout: fixed; }
+.cuentas-table th, .cuentas-table td { overflow: hidden; text-overflow: ellipsis; }
+
